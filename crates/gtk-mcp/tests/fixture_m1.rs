@@ -4,7 +4,6 @@
 
 mod fixture_env;
 
-use base64::Engine as _;
 use fixture_env::*;
 use gtk_mcp::{Broker, Config, Policy};
 use gtk_mcp_protocol::ErrorCode;
@@ -522,5 +521,4 @@ async fn diff_snapshots_reports_expander_child_changes() {
     assert!(fields.contains("attached") && fields.contains("mapped"), "{ch}");
     let e = c.err("diff_snapshots", json!({"from": "snap-9999", "to": b["snapshot_id"]})).await;
     assert_eq!(e.code, ErrorCode::SnapshotUnavailable);
-    let _ = base64::engine::general_purpose::STANDARD;
 }
