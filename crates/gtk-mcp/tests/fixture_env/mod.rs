@@ -66,11 +66,8 @@ mod placement {
     /// Move the nested compositor's window (host app_id `niri`, owned by `pid`)
     /// to a different output than the one in use, then restore the focus.
     pub fn move_away(b: &Before, pid: u32) {
-        let target = std::env::var("GTK_MCP_TEST_NESTED_OUTPUT").ok().or_else(|| {
-            let outs = host(&["outputs"])?;
-            let work = b.work_output.as_deref();
-            outs.as_object()?.keys().find(|k| Some(k.as_str()) != work).cloned()
-        });
+        let target = std::env::var("GTK_MCP_TEST_NESTED_OUTPUT").ok();
+        let _ = &b.work_output;
         let Some(target) = target else { return };
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -106,6 +103,9 @@ fn start_nested_niri() -> Result<Display, String> {
     std::fs::write(&cfg, "output \"winit\" {\n    mode \"1280x800@60\"\n    scale 1\n}\n").map_err(|e| e.to_string())?;
     let log = std::fs::File::create(root.join("niri.log")).map_err(|e| e.to_string())?;
     let log2 = log.try_clone().map_err(|e| e.to_string())?;
+    if std::env::var_os("NIRI_SOCKET").is_some() && std::env::var_os("GTK_MCP_TEST_NESTED_OUTPUT").is_none() {
+        return Err("host niri detected: set GTK_MCP_TEST_NESTED_OUTPUT=<output name> so the nested compositor window is placed off your working output".into());
+    }
     let before = placement::before();
     let mut cmd = Command::new("niri");
     cmd.env("XDG_RUNTIME_DIR", &runtime)
