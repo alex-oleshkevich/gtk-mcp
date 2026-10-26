@@ -118,7 +118,7 @@ fn stdio_lists_all_18_tools_with_annotations() {
     let mut c = Client::start(dir.path(), &[]);
     let tools = c.tools();
     let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    let expected: BTreeSet<&str> = TOOLS.iter().map(|t| t.name).collect();
+    let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core").map(|t| t.name).collect();
     assert_eq!(tools.len(), 18);
     assert_eq!(names, expected);
     for t in &tools {
@@ -134,6 +134,25 @@ fn stdio_lists_all_18_tools_with_annotations() {
         }
     }
     assert!(tools.iter().any(|t| t["name"] == "batch" && t["annotations"]["readOnlyHint"] != true));
+}
+
+#[test]
+fn stdio_layout_style_toolset_adds_nine_annotated_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::start(dir.path(), &["--toolsets", "core,layout-style"]);
+    let tools = c.tools();
+    let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core" || t.toolset == "layout-style").map(|t| t.name).collect();
+    assert_eq!(tools.len(), 27);
+    assert_eq!(names, expected);
+    for name in ["apply_css", "remove_css", "highlight", "override_setting"] {
+        let t = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert_eq!(t["annotations"]["destructiveHint"], true, "{name}");
+    }
+    for name in ["inspect_layout", "audit_layout", "inspect_style", "inspect_render", "inspect_settings"] {
+        let t = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert_eq!(t["annotations"]["readOnlyHint"], true, "{name}");
+    }
 }
 
 #[test]

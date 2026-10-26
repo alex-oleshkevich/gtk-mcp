@@ -63,6 +63,8 @@ impl Agent {
     }
 
     pub fn cleanup(&self) {
+        tools::style::release_all();
+        tools::settings::release_all();
         if let Some(s) = self.socket.borrow_mut().take() {
             s.cleanup();
         }
@@ -78,9 +80,11 @@ impl Agent {
         self.capture_seq.get()
     }
 
-    fn on_disconnect(&self, _conn: u64) {
-        // Per-connection state (temporary CSS, watches, recordings) arrives with
-        // later milestones and is released here.
+    fn on_disconnect(&self, conn: u64) {
+        // Per-connection state (temporary CSS, setting overrides; later watches
+        // and recordings) is released here.
+        tools::style::release_conn(conn);
+        tools::settings::release_conn(conn);
     }
 
     pub fn hello_ack(&self) -> HelloAck {
