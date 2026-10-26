@@ -161,19 +161,35 @@ pub fn start_with_uid(dir: &Path, tx: async_channel::Sender<Incoming>, allowed_u
     }
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    std::thread::Builder::new().name("gtk-mcp-accept".into()).spawn(move || {
-        let next_conn = AtomicU64::new(1);
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            match peer_uid(&stream) {
-                Ok(uid) if uid == allowed_uid => {}
-                _ => continue, // dropped: wrong or unknown peer
-            }
-            let id = next_conn.fetch_add(1, Ordering::Relaxed);
-            serve(id, stream, tx.clone());
-        }
-    })?;
+    std::thread::Builder::new().name("gtk-mcp-accept".into()).spawn(move || accept_loop(listener.incoming(), tx, allowed_uid))?;
     Ok(SocketHandle { path })
+}
+
+/// Pause after a failed accept(): EMFILE/ENFILE leave the connection queued,
+/// so retrying at once would spin until a descriptor frees up.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
+fn accept_loop(
+    incoming: impl Iterator<Item = std::io::Result<UnixStream>>,
+    tx: async_channel::Sender<Incoming>,
+    allowed_uid: u32,
+) {
+    let next_conn = AtomicU64::new(1);
+    for stream in incoming {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(_) => {
+                std::thread::sleep(ACCEPT_BACKOFF);
+                continue;
+            }
+        };
+        match peer_uid(&stream) {
+            Ok(uid) if uid == allowed_uid => {}
+            _ => continue, // dropped: wrong or unknown peer
+        }
+        let id = next_conn.fetch_add(1, Ordering::Relaxed);
+        serve(id, stream, tx.clone());
+    }
 }
 
 fn serve(conn_id: u64, stream: UnixStream, tx: async_channel::Sender<Incoming>) {
@@ -364,5 +380,17 @@ mod tests {
         assert_eq!(v["id"], 9);
         assert_eq!(v["error"]["data"]["code"], "invalid_value");
         assert!(v["error"]["message"].as_str().unwrap().contains("levels deep"), "{v}");
+    }
+
+    /// gm-7yw: failing accept() calls (EMFILE leaves the connection queued)
+    /// are retried after a pause, never in a tight loop.
+    #[test]
+    fn accept_errors_back_off() {
+        let (tx, rx) = async_channel::unbounded();
+        let errors = std::iter::repeat_with(|| Err(std::io::Error::from_raw_os_error(libc::EMFILE))).take(4);
+        let t = Instant::now();
+        accept_loop(errors, tx, 0);
+        assert!(t.elapsed() >= ACCEPT_BACKOFF * 4, "{:?}", t.elapsed());
+        assert!(rx.try_recv().is_err());
     }
 }
