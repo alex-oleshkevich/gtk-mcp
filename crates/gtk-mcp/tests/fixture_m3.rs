@@ -440,6 +440,8 @@ async fn render_tree_is_limited_and_keeps_secrets_out() {
     c.json("interact", json!({"target": by_id("password"), "operation": "fill", "text": SECRET})).await;
     c.json("interact", json!({"target": by_id("password-row"), "operation": "fill", "text": SECRET})).await;
     for id in ["password", "password-row"] {
+        // Widgets scrolled out of the viewport have no render node in the last frame.
+        c.json("interact", json!({"target": by_id(id), "operation": "scroll_to"})).await;
         let r = c.json("inspect_render", json!({"target": by_id(id)})).await;
         let s = r.to_string();
         assert!(!s.contains(SECRET), "{id}: secret leaked");

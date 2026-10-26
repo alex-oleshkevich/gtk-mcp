@@ -316,6 +316,23 @@ impl Client {
         }
     }
 
+    /// Wait (bounded) until the widget tree stops changing: list views realize rows
+    /// lazily during the first frames, which would otherwise race ref comparisons.
+    pub async fn settle_tree(&self) {
+        let mut last: Vec<String> = Vec::new();
+        for _ in 0..40 {
+            let s = self.snapshot_json(json!({})).await;
+            let mut refs = Vec::new();
+            count_refs(&s, &mut refs);
+            if refs == last {
+                return;
+            }
+            last = refs;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        panic!("widget tree did not settle within 6 s");
+    }
+
     pub async fn snapshot_json(&self, args: Value) -> Value {
         let mut a = args;
         a["format"] = json!("json");

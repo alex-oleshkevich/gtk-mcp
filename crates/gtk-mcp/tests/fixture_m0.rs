@@ -88,6 +88,7 @@ async fn snapshot_refs_are_stable_and_text_matches_json() {
     let display = require_display!();
     let fx = Fixture::start(&display, false, &[]);
     let c = Client { broker: fx.broker(false) };
+    c.settle_tree().await;
     let a = c.snapshot_json(json!({})).await;
     let b = c.snapshot_json(json!({})).await;
     assert_ne!(a["snapshot_id"], b["snapshot_id"]);
@@ -196,6 +197,7 @@ async fn snapshot_semantic_view_keeps_hierarchy_and_marks_elision() {
     let display = require_display!();
     let fx = Fixture::start(&display, false, &[]);
     let c = Client { broker: fx.broker(false) };
+    c.settle_tree().await;
     let full = c.snapshot_json(json!({})).await;
     let sem = c.snapshot_json(json!({"view": "semantic"})).await;
     assert!(sem["node_count"].as_u64().unwrap() < full["node_count"].as_u64().unwrap());

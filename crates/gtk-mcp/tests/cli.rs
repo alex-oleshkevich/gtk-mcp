@@ -143,7 +143,7 @@ fn stdio_layout_style_toolset_adds_nine_annotated_tools() {
     let tools = c.tools();
     let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core" || t.toolset == "layout-style").map(|t| t.name).collect();
-    assert_eq!(tools.len(), 27);
+    assert_eq!(tools.len(), expected.len());
     assert_eq!(names, expected);
     for name in ["apply_css", "remove_css", "highlight", "override_setting"] {
         let t = tools.iter().find(|t| t["name"] == name).unwrap();
@@ -160,7 +160,7 @@ fn stdio_toolsets_actions_adds_the_nine_actions_tools() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &["--toolsets", "core,actions"]);
     let tools = c.tools();
-    assert_eq!(tools.len(), 27);
+    assert_eq!(tools.len(), TOOLS.iter().filter(|t| t.toolset == "core" || t.toolset == "actions").count());
     for n in ["list_actions", "activate_shortcut", "inspect_controllers"] {
         assert!(tools.iter().any(|t| t["name"] == n), "{n}");
     }
