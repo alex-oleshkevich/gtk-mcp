@@ -306,7 +306,7 @@ async fn windows_list_window_and_layer_data_absent_without_layer_shell() {
     assert_eq!(win["visible"], true);
     assert!(win["renderer"].as_str().unwrap().contains("Renderer"));
     assert!(win["surface_scale"].as_i64().unwrap() >= 1);
-    assert!(win.get("layer_shell").is_none(), "no layer data when gtk4-layer-shell is not loaded");
+    assert!(win.get("layer_shell").is_none(), "plain window must not report layer data (gm-66t; see fixture_layer.rs)");
     assert!(win["ref"].as_str().unwrap().starts_with('w'));
     // the window ref resolves in snapshot roots
     let s = c.snapshot_json(json!({"root": win["ref"]})).await;

@@ -285,6 +285,59 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     win
 }
 
+thread_local! {
+    /// Windows (panel / lock surfaces) kept alive for the app's lifetime.
+    static SURFACE_WINDOWS: RefCell<Vec<gtk::Window>> = const { RefCell::new(Vec::new()) };
+    static LOCK_INSTANCE: RefCell<Option<gtk4_session_lock::Instance>> = const { RefCell::new(None) };
+    static SURFACES_SPAWNED: Cell<bool> = const { Cell::new(false) };
+}
+
+fn keep_surface(win: gtk::Window) {
+    SURFACE_WINDOWS.with(|w| w.borrow_mut().push(win));
+}
+
+/// A real layer-shell panel with distinctive values in every reported field.
+fn spawn_layer_panel() {
+    use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+    let panel = gtk::Window::builder().title("gtk-mcp fixture panel").build();
+    panel.init_layer_shell();
+    panel.set_namespace(Some("fixture-panel"));
+    panel.set_layer(Layer::Top);
+    for edge in [Edge::Left, Edge::Right, Edge::Top] {
+        panel.set_anchor(edge, true);
+    }
+    panel.set_margin(Edge::Left, 10);
+    panel.set_margin(Edge::Right, 20);
+    panel.set_margin(Edge::Top, 30);
+    panel.set_margin(Edge::Bottom, 40);
+    panel.set_exclusive_zone(42);
+    panel.set_keyboard_mode(KeyboardMode::OnDemand);
+    panel.set_child(Some(&gtk::Label::new(Some("fixture panel"))));
+    panel.present();
+    keep_surface(panel);
+}
+
+/// A session-lock window: libgtk4-layer-shell stores its lock surface under
+/// the same qdata key as layer surfaces (gm-66t), so this is the window type
+/// that used to be reported with garbage layer-shell fields.
+fn spawn_session_lock() {
+    if SURFACES_SPAWNED.with(|s| s.get()) {
+        return;
+    }
+    SURFACES_SPAWNED.with(|s| s.set(true));
+    let instance = gtk4_session_lock::Instance::new();
+    instance.connect_monitor(|instance, monitor| {
+        let win = gtk::Window::builder()
+            .title("gtk-mcp fixture lock")
+            .child(&gtk::Label::new(Some("fixture lock")))
+            .build();
+        instance.assign_window_to_monitor(&win, monitor);
+        keep_surface(win);
+    });
+    instance.lock();
+    LOCK_INSTANCE.with(|l| *l.borrow_mut() = Some(instance));
+}
+
 fn main() -> glib::ExitCode {
     // FIXTURE_UNIQUE=1 keeps GApplication uniqueness, so a second instance is a
     // remote one (it never emits `startup`, hence never binds a socket).
@@ -307,6 +360,14 @@ fn main() -> glib::ExitCode {
         }
         let win = build_window(app);
         win.present();
+        // gm-66t regression surfaces: a real layer-shell panel and/or a
+        // session-lock window, only when the test asks for them.
+        if std::env::var_os("FIXTURE_LAYER_PANEL").is_some() {
+            spawn_layer_panel();
+        }
+        if std::env::var_os("FIXTURE_SESSION_LOCK").is_some() {
+            spawn_session_lock();
+        }
     });
     app.run()
 }

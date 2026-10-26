@@ -1,5 +1,16 @@
 //! gtk4-layer-shell getters resolved with `dlsym(RTLD_DEFAULT)` only when the
 //! library is already loaded in the process (plan 6). The agent never links it.
+//!
+//! gm-66t: `gtk_layer_is_layer_window` alone cannot be trusted to identify a
+//! layer window. libgtk4-layer-shell also implements the session-lock API, and
+//! `gtk4-session-lock.c` stores its (differently laid out, smaller) lock
+//! surface under the *same* `g_object` data key `"wayland_layer_surface"` as
+//! `gtk4-layer-shell.c` uses for layer surfaces. `is_layer_window` therefore
+//! returns true for session-lock windows, and the `gtk_layer_get_*` getters
+//! then read fields past the lock struct, reporting heap garbage (and
+//! dereferencing a garbage namespace pointer). [`is_layer_window`] additionally
+//! confirms the stored surface really is a layer surface before any getter
+//! runs; windows that fail the check get no layer-shell section at all.
 
 use gtk4 as gtk;
 use serde_json::{Value, json};
@@ -24,7 +35,59 @@ fn is_layer_window(w: &gtk::Window) -> Option<bool> {
     use glib::translate::ToGlibPtr;
     let f: WinInt = unsafe { std::mem::transmute(sym(c"gtk_layer_is_layer_window")?) };
     let p: *mut gtk::ffi::GtkWindow = w.to_glib_none().0;
-    Some(unsafe { f(p.cast()) } != 0)
+    if unsafe { f(p.cast()) } == 0 {
+        return Some(false);
+    }
+    Some(surface_is_layer(w))
+}
+
+/// Confirm the surface stored under `"wayland_layer_surface"` is a layer
+/// surface, not a session-lock surface (see module docs). Only offsets that
+/// exist in both structs are read: the shared `xdg_surface_server` vtable at
+/// the start, and the two function pointers a layer surface carries right
+/// after it (lock surfaces store Wayland proxies there instead).
+fn surface_is_layer(w: &gtk::Window) -> bool {
+    use glib::translate::ToGlibPtr;
+    let p: *mut gtk::ffi::GtkWindow = w.to_glib_none().0;
+    // SAFETY: plain qdata lookup; the library owns the stored surface.
+    let data = unsafe {
+        glib::gobject_ffi::g_object_get_data(p.cast(), c"wayland_layer_surface".as_ptr())
+    };
+    if data.is_null() {
+        return false;
+    }
+    // SAFETY: `data` is a layer or lock surface struct; both are at least
+    // 104 bytes, covering every word read here.
+    let word = |byte: usize| unsafe {
+        *(data as *const *const c_void).add(byte / std::mem::size_of::<*const c_void>())
+    };
+    // `layer_surface_make` installs a `window_geometry_set` callback;
+    // `lock_surface_make` leaves that vtable slot null.
+    if !word(0).is_null() {
+        return true;
+    }
+    // Fallback if a future library stops installing that callback: a layer
+    // surface's `remap`/`get_preferred_size` slots (bytes 88/96) point into
+    // libgtk4-layer-shell itself, a lock surface's hold heap Wayland proxies.
+    let Some(reference) = sym(c"gtk_layer_is_layer_window") else {
+        return false;
+    };
+    in_same_library(word(88), reference) && in_same_library(word(96), reference)
+}
+
+fn in_same_library(p: *const c_void, reference: *mut c_void) -> bool {
+    if p.is_null() {
+        return false;
+    }
+    // SAFETY: dladdr only inspects the address; DlInfo is plain data.
+    unsafe {
+        let mut a: libc::Dl_info = std::mem::zeroed();
+        let mut b: libc::Dl_info = std::mem::zeroed();
+        libc::dladdr(p, &mut a) != 0
+            && libc::dladdr(reference, &mut b) != 0
+            && !a.dli_fbase.is_null()
+            && a.dli_fbase == b.dli_fbase
+    }
 }
 
 /// The window's namespace when it is a layer-shell window.
