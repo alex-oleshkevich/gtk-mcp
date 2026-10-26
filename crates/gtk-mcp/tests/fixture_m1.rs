@@ -172,12 +172,24 @@ async fn capture_settled_after_expand_and_unmapped_target() {
     // annotate returns refs with bounds
     let ann = c.json("capture", json!({"target": by_id("advanced-expander"), "annotate": true})).await;
     assert!(!ann["annotations"].as_array().unwrap().is_empty());
-    // window capture excludes popovers; scale is honoured
+    // `scale` multiplies the logical size. A content-sized button is used because a
+    // compositor may resize the *window* between two captures (tiling reconfigure:
+    // seen under sway, where consecutive window captures were 640 and 427 logical px wide),
+    // which would make a window-vs-window ratio meaningless.
+    let b1 = c.call("capture", json!({"target": by_id("remove-widget")})).await.unwrap();
+    let b2 = c.call("capture", json!({"target": by_id("remove-widget"), "scale": 2.0})).await.unwrap();
+    let (m1, m2) = (b1.json_content().unwrap(), b2.json_content().unwrap());
+    assert_eq!(m2["scale"], 2.0);
+    let (i1, i2) = (decode_png(b1.images()[0]), decode_png(b2.images()[0]));
+    assert_eq!(i1.width(), m1["width"]);
+    assert_eq!(i2.width(), m2["width"]);
+    assert!(i2.width().abs_diff(i1.width() * 2) <= 1 && i2.height().abs_diff(i1.height() * 2) <= 1, "{}x{} vs {}x{}", i2.width(), i2.height(), i1.width(), i1.height());
+    // a window capture honours scale against the window's own size at capture time
     let win = c.json("list_windows", json!({})).await["windows"][0]["ref"].clone();
-    let w1 = c.call("capture", json!({"target": win})).await.unwrap();
     let w2 = c.call("capture", json!({"target": win, "scale": 2.0})).await.unwrap();
-    let (i1, i2) = (decode_png(w1.images()[0]), decode_png(w2.images()[0]));
-    assert_eq!(i2.width(), i1.width() * 2);
+    let wm = w2.json_content().unwrap();
+    assert_eq!(decode_png(w2.images()[0]).width(), wm["width"]);
+    assert_eq!(wm["scale"], 2.0);
 }
 
 // ---- AC-6 --------------------------------------------------------------------
