@@ -88,6 +88,19 @@ fn settings() -> Result<gtk::Settings, AgentError> {
     gtk::Settings::default().ok_or_else(|| AgentError::new(ErrorCode::Unavailable, "there is no default GtkSettings (no display)"))
 }
 
+/// `gtk-application-prefer-dark-theme` through its GObject property. The
+/// typed accessors are deprecated since GTK 4.20 and have no replacement
+/// API (without libadwaita, handled above, this GtkSettings property is
+/// the only way to request a dark theme); the generic property accessors
+/// are not deprecated and the property exists well below the 4.10 floor.
+fn prefer_dark(s: &gtk::Settings) -> bool {
+    s.property::<bool>("gtk-application-prefer-dark-theme")
+}
+
+fn set_prefer_dark(s: &gtk::Settings, dark: bool) {
+    s.set_property("gtk-application-prefer-dark-theme", dark);
+}
+
 pub fn inspect_settings(_agent: &Rc<Agent>, _p: InspectSettingsParams) -> Result<Value, AgentError> {
     let settings = settings()?;
     let mut gtk_props = Map::new();
@@ -146,7 +159,7 @@ fn restore(prev: Prev) {
         }
         Prev::PreferDark(b) => {
             if let Some(s) = gtk::Settings::default() {
-                s.set_gtk_application_prefer_dark_theme(b);
+                set_prefer_dark(&s, b);
             }
         }
         Prev::Animations(b) => {
@@ -259,13 +272,13 @@ pub fn override_setting(_agent: &Rc<Agent>, p: OverrideSettingParams, ctx: &Ctx)
                     "light" | "default" | "force-light" | "force_light" | "prefer-light" | "prefer_light" => false,
                     _ => return Err(bad("without libadwaita color_scheme is one of: light, dark, default")),
                 };
-                let previous = settings.is_gtk_application_prefer_dark_theme();
-                settings.set_gtk_application_prefer_dark_theme(dark);
+                let previous = prefer_dark(&settings);
+                set_prefer_dark(&settings, dark);
                 (
                     Prev::PreferDark(previous),
                     Applied {
                         previous: json!({"gtk-application-prefer-dark-theme": previous}),
-                        observed: json!({"gtk-application-prefer-dark-theme": settings.is_gtk_application_prefer_dark_theme()}),
+                        observed: json!({"gtk-application-prefer-dark-theme": prefer_dark(&settings)}),
                     },
                 )
             }

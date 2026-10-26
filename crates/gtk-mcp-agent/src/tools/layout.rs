@@ -1,8 +1,8 @@
 //! `inspect_layout` and `audit_layout` (tools.md layout-style, plan AC-12).
 //!
 //! Everything is read through public GTK API: `gtk_widget_measure`,
-//! `gtk_widget_get_allocation`, `gtk_widget_compute_bounds`, the label's pango
-//! layout and the icon theme. Audit rules judge mapped widgets only (what a
+//! `gtk_widget_compute_bounds`, the label's pango layout and the icon theme.
+//! Audit rules judge mapped widgets only (what a
 //! human can currently see); detached adapter content is not audited.
 
 use crate::agent::Agent;
@@ -64,8 +64,49 @@ fn measure(w: &gtk::Widget, o: gtk::Orientation, for_size: i32) -> Value {
 }
 
 fn allocation_json(w: &gtk::Widget) -> Value {
-    let a = w.allocation();
-    json!({"x": a.x(), "y": a.y(), "width": a.width(), "height": a.height()})
+    // `gtk_widget_get_allocation` is deprecated since GTK 4.12 in favour of
+    // `gtk_widget_compute_bounds` (available long before the 4.10 floor):
+    // the allocation was the widget's rect in its parent's coordinates, so
+    // compute the bounds against the parent (against itself for a root).
+    // Unallocated widgets have no bounds; report a zero rect at the origin.
+    let bounds = match w.parent() {
+        Some(parent) => w.compute_bounds(&parent),
+        None => w.compute_bounds(w),
+    };
+    match bounds {
+        Some(b) => json!({
+            "x": b.x().round() as i32,
+            "y": b.y().round() as i32,
+            "width": b.width().round() as i32,
+            "height": b.height().round() as i32,
+        }),
+        None => json!({"x": 0, "y": 0, "width": w.width(), "height": w.height()}),
+    }
+}
+
+/// The widget's baseline, via `gtk_widget_get_baseline` (the GTK 4.12
+/// replacement for the deprecated `gtk_widget_get_allocated_baseline`).
+/// That symbol is newer than the 4.10 API floor the agent compiles against,
+/// so it is resolved at runtime with `dlsym` (plan 6), falling back to the
+/// pre-4.12 symbol on older GTK. Both have the same signature and return
+/// -1 when the widget has no baseline.
+fn baseline(w: &gtk::Widget) -> i32 {
+    use glib::translate::ToGlibPtr;
+    use std::ffi::{CStr, c_int, c_void};
+    type WidgetInt = unsafe extern "C" fn(*mut c_void) -> c_int;
+    let sym = |name: &CStr| {
+        // SAFETY: plain lookup in the global namespace.
+        unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }
+    };
+    let p = sym(c"gtk_widget_get_baseline");
+    let p = if p.is_null() { sym(c"gtk_widget_get_allocated_baseline") } else { p };
+    if p.is_null() {
+        return -1;
+    }
+    // SAFETY: both symbols are `int (*)(GtkWidget *)`.
+    let f: WidgetInt = unsafe { std::mem::transmute(p) };
+    let ptr: *mut gtk::ffi::GtkWidget = w.to_glib_none().0;
+    unsafe { f(ptr.cast()) }
 }
 
 fn brief(agent: &Agent, w: &gtk::Widget) -> Map<String, Value> {
@@ -78,7 +119,6 @@ fn brief(agent: &Agent, w: &gtk::Widget) -> Map<String, Value> {
     m
 }
 
-#[allow(deprecated)]
 pub fn inspect_layout(agent: &Rc<Agent>, p: InspectLayoutParams) -> Result<Value, AgentError> {
     let w = selector::resolve_widget(agent, &p.target, true)?;
     let mut m = Map::new();
@@ -90,7 +130,7 @@ pub fn inspect_layout(agent: &Rc<Agent>, p: InspectLayoutParams) -> Result<Value
     m.insert("child_visible".into(), json!(w.is_child_visible()));
 
     m.insert("allocation".into(), allocation_json(&w));
-    m.insert("baseline".into(), json!(w.allocated_baseline()));
+    m.insert("baseline".into(), json!(baseline(&w)));
     m.insert("size_request".into(), {
         let (width, height) = w.size_request();
         json!({"width": width, "height": height})
