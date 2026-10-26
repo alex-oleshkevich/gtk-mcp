@@ -387,17 +387,18 @@ fn popover_of(w: &gtk::Widget) -> Option<gtk::Popover> {
     None
 }
 
-/// Poll `cond` on the main loop until true or `limit` passes.
-async fn wait_until(ctx: &Ctx, limit: Duration, mut cond: impl FnMut() -> bool) -> Result<bool, AgentError> {
+/// Poll `cond` on the main loop until true or `limit` passes. Called after the
+/// operation was dispatched: cancellation only ends the wait (`false`), so the
+/// result still reaches the broker, as `$/late_result` when it timed out.
+async fn wait_until(ctx: &Ctx, limit: Duration, mut cond: impl FnMut() -> bool) -> bool {
     let until = Instant::now() + limit;
     while !cond() {
-        ctx.check()?;
-        if Instant::now() >= until {
-            return Ok(false);
+        if ctx.is_cancelled() || Instant::now() >= until {
+            return false;
         }
         glib::timeout_future(SETTLE_POLL).await;
     }
-    Ok(true)
+    true
 }
 
 async fn popup(agent: &Agent, w: &gtk::Widget, open: bool, ctx: &Ctx) -> Result<Value, AgentError> {
@@ -421,7 +422,7 @@ async fn popup(agent: &Agent, w: &gtk::Widget, open: bool, ctx: &Ctx) -> Result<
         return Err(unsupported("the menu button has no popover or menu model"));
     };
     // The popover's surface is created / destroyed on a later main-loop turn.
-    let mapped = wait_until(ctx, MAP_WAIT, || po.is_mapped() == open).await?;
+    let mapped = wait_until(ctx, MAP_WAIT, || po.is_mapped() == open).await;
     let key = if w.is::<gtk::MenuButton>() { "popover_visible" } else { "open" };
     Ok(json!({key: po.is_visible(), "popover": agent.registry.ref_for(&po), "popover_mapped": po.is_mapped(), "settled": mapped}))
 }
@@ -569,11 +570,11 @@ async fn media(w: &gtk::Widget, op: &InteractOp, ctx: &Ctx) -> Result<Value, Age
     match op {
         InteractOp::Play => {
             m.play();
-            wait_until(ctx, MEDIA_WAIT, || m.is_playing() || m.is_ended()).await?;
+            wait_until(ctx, MEDIA_WAIT, || m.is_playing() || m.is_ended()).await;
         }
         InteractOp::Pause => {
             m.pause();
-            wait_until(ctx, MEDIA_WAIT, || !m.is_playing()).await?;
+            wait_until(ctx, MEDIA_WAIT, || !m.is_playing()).await;
         }
         InteractOp::Seek { microseconds } => {
             if !m.is_seekable() {
@@ -584,9 +585,32 @@ async fn media(w: &gtk::Widget, op: &InteractOp, ctx: &Ctx) -> Result<Value, Age
                 return Err(invalid(format!("position {microseconds} is outside [0, {dur}] microseconds")).with_data(json!({"duration": dur})));
             }
             m.seek(*microseconds);
-            wait_until(ctx, MEDIA_WAIT, || !m.is_seeking()).await?;
+            wait_until(ctx, MEDIA_WAIT, || !m.is_seeking()).await;
         }
         _ => unreachable!("media() is only called for play/pause/seek"),
     }
     Ok(media_json(&m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::socket::Conn;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn a_cancelled_wait_after_dispatch_ends_without_an_error() {
+        let ctx = Ctx {
+            id: 1,
+            conn: Conn::detached(1),
+            cancelled: Arc::new(AtomicBool::new(true)),
+            deadline: None,
+            started: Instant::now(),
+        };
+        let t = Instant::now();
+        let settled = glib::MainContext::default().block_on(wait_until(&ctx, Duration::from_secs(5), || false));
+        assert!(!settled);
+        assert!(t.elapsed() < Duration::from_secs(1), "cancellation ends the wait at once");
+    }
 }

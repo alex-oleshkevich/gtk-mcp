@@ -226,7 +226,12 @@ pub async fn trace_focus_order(agent: &Rc<Agent>, p: TraceFocusOrderParams, ctx:
     let mut end = "end";
     let mut repeat_of: Option<usize> = None;
     for _ in 0..max_steps {
-        ctx.check()?;
+        // Cancelled: stop walking, but still restore the focus and report what
+        // was walked (the focus already moved; plan 4.2 late results).
+        if ctx.is_cancelled() {
+            end = "cancelled";
+            break;
+        }
         let before = GtkWindowExt::focus(&window);
         let moved = scope.as_ref().map_or_else(|| window.upcast_ref::<gtk::Widget>(), |s| s).child_focus(gtk::DirectionType::TabForward);
         let now = GtkWindowExt::focus(&window);
@@ -253,8 +258,8 @@ pub async fn trace_focus_order(agent: &Rc<Agent>, p: TraceFocusOrderParams, ctx:
     let reached = |w: &gtk::Widget| {
         seen.contains(w) || seen.iter().any(|f| f.ancestor(w.type_()).as_ref() == Some(w) && f != w)
     };
-    // A walk cut short by `max_steps` proves nothing about what it did not reach.
-    let unreachable: Value = if end == "max_steps" {
+    // A walk cut short (`max_steps`, cancellation) proves nothing about what it did not reach.
+    let unreachable: Value = if matches!(end, "max_steps" | "cancelled") {
         Value::Null
     } else {
         Value::Array(candidates.iter().filter(|w| !reached(w)).enumerate().map(|(i, w)| focus_json(agent, w, i)).collect())

@@ -282,6 +282,23 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
         }
     });
     win.add_action(&limit);
+    // Debug hook: both handlers block the main loop for 2 s, so a short broker
+    // deadline cancels the request after the mutation ran (late results).
+    let slow = gio::SimpleAction::new_stateful("slow", None, &0i32.to_variant());
+    {
+        let bump = bump.clone();
+        slow.connect_activate(move |_, _| {
+            block_main_loop(Duration::from_secs(2));
+            bump();
+        });
+    }
+    slow.connect_change_state(|a, v| {
+        block_main_loop(Duration::from_secs(2));
+        if let Some(v) = v {
+            a.set_state(v);
+        }
+    });
+    win.add_action(&slow);
     win
 }
 

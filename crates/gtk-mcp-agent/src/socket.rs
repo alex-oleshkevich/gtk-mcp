@@ -66,6 +66,14 @@ impl Conn {
     }
 }
 
+#[cfg(test)]
+impl Conn {
+    /// A connection whose peer is gone (unit tests of handlers).
+    pub(crate) fn detached(id: u64) -> Self {
+        Conn { id, tx: mpsc::channel().0, inflight: Arc::default() }
+    }
+}
+
 pub struct Req {
     pub conn: Conn,
     pub id: u64,

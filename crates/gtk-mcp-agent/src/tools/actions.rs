@@ -186,7 +186,8 @@ pub async fn activate_action(agent: &Rc<Agent>, p: ActivateActionParams, ctx: &C
             observed = json!({"name": full, "state_observable": false});
         }
     }
-    ctx.check()?;
+    // The action ran: from here on cancellation never turns the result into an
+    // error, so a timed-out call is still reported as `$/late_result`.
     extra.insert("activated".into(), json!(true));
     let mut res = observe::finish(agent, addr.scope.target_ref(agent), observed, widget.as_ref(), p.observe.as_ref(), ctx).await;
     for (k, v) in extra {
@@ -229,7 +230,6 @@ pub async fn change_action_state(agent: &Rc<Agent>, p: ChangeActionStateParams, 
     let requested = actions::json_to_variant(&state_type, &p.value).map_err(|m| AgentError::new(ErrorCode::InvalidValue, m))?;
     let before = g.group.action_state(&action);
     g.group.change_action_state(&action, &requested);
-    ctx.check()?;
     let after = g.group.action_state(&action);
     let accepted = after.as_ref() == Some(&requested);
     let observed = if g.group.has_action(&action) {

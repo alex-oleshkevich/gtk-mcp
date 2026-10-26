@@ -152,6 +152,46 @@ async fn ac7_change_action_state_returns_observed_state_including_rejection() {
     assert_eq!(counter(&c).await, "clicks: 0");
 }
 
+/// The first late result recorded at or after event cursor `after` (waits at most 10 s).
+async fn late_result(c: &Client, after: u64) -> Value {
+    let session = c.broker.sessions().remove(0);
+    let t = std::time::Instant::now();
+    loop {
+        let evs = session.events_since(after);
+        if let Some(l) = evs.entries.iter().find(|e| e.value["kind"] == "late_result") {
+            return l.value.clone();
+        }
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "late result never recorded");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_that_outlive_the_deadline_are_reported_as_late_results() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let policy = Policy { allow_mutations: true, toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
+    let mut cfg = Config::with_socket_dir(fx.dir.path());
+    cfg.default_deadline_ms = 1000;
+    let c = Client { broker: Broker::new(policy, cfg).unwrap() };
+    c.json("list_apps", json!({})).await;
+
+    // win.slow blocks the main loop for 2 s inside its handlers.
+    let e = c.err("activate_action", json!({"name": "win.slow"})).await;
+    assert_eq!(e.code, ErrorCode::Timeout, "{e:?}");
+    assert_eq!(e.data.as_ref().unwrap()["started"], true);
+    let late = late_result(&c, 0).await;
+    assert_eq!(late["result"]["activated"], true, "{late}");
+    assert_eq!(late["result"]["action"], "win.slow");
+
+    let cursor = c.broker.sessions().remove(0).events_since(0).next_cursor;
+    let e = c.err("change_action_state", json!({"name": "win.slow", "value": 5})).await;
+    assert_eq!(e.code, ErrorCode::Timeout, "{e:?}");
+    let late = late_result(&c, cursor).await;
+    assert_eq!((&late["result"]["accepted"], &late["result"]["observed"]["state"]), (&json!(true), &json!(5)), "{late}");
+    assert_eq!(counter(&rw(&fx)).await, "clicks: 1", "the activation ran exactly once and was never retried");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn registered_widget_group_is_listed_typed_and_activated() {
     let display = require_display!();
