@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 mod m4;
+mod m5;
 
 thread_local! {
     /// Strong reference that keeps a removed widget alive until "finalize-widget".
@@ -241,6 +242,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     build_interact_extras(&root);
     m3::extras(&root);
     m4::extras(&root, app);
+    m5::extras(&root);
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&root));
     scroll.set_vexpand(true);
@@ -289,6 +291,7 @@ fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id("dev.gtkmcp.Fixture").flags(flags).build();
     gtk_mcp_agent::attach(&app);
     m4::init_app(&app);
+    m5::init_app();
     let quit = gio::SimpleAction::new("quit", None);
     {
         let app = app.clone();

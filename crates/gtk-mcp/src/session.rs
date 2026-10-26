@@ -13,7 +13,7 @@ use std::io::{self, BufReader};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
@@ -55,6 +55,8 @@ pub struct Session {
     writer: Mutex<Option<UnixStream>>,
     /// 0 while alive; otherwise the order in which sessions exited (for retention).
     exit_seq: AtomicU64,
+    /// A `$/log` record arrived: the app forwards its logs (`forward_log`).
+    log_forwarded: AtomicBool,
     pub(crate) snapshots: Mutex<Store<Value>>,
     pub(crate) captures: Mutex<Store<Arc<Vec<u8>>>>,
 }
@@ -168,6 +170,7 @@ impl Session {
             launch,
             writer: Mutex::new(None),
             exit_seq: AtomicU64::new(0),
+            log_forwarded: AtomicBool::new(false),
             snapshots: Mutex::new(Store::new(retain_snapshots)),
             captures: Mutex::new(Store::new(retain_captures)),
         });
@@ -216,6 +219,12 @@ impl Session {
     }
     pub fn launched_by_broker(&self) -> bool {
         self.launch.is_some()
+    }
+    /// Does this app forward log records (`forward_log`)? True once it advertised
+    /// `LogForwarding` or sent a `$/log` record.
+    pub fn log_forwarding(&self) -> bool {
+        self.log_forwarded.load(Ordering::Acquire)
+            || self.hello.as_ref().is_some_and(|h| h.capabilities.contains(&gtk_mcp_protocol::Capability::LogForwarding))
     }
     /// Last `n` captured log entries (stdout/stderr lines and forwarded records), oldest first.
     pub fn log_tail(&self, n: usize) -> Vec<Value> {
@@ -374,6 +383,7 @@ impl Session {
                 lock(&self.inner).events.push(n.params);
             }
             method::LOG => {
+                self.log_forwarded.store(true, Ordering::Release);
                 lock(&self.logs).push(n.params);
             }
             method::LATE_RESULT => match serde_json::from_value::<LateResult>(n.params) {

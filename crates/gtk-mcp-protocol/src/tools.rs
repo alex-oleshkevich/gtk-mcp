@@ -7,6 +7,7 @@
 
 use crate::tools_m2::*;
 use crate::tools_m4::*;
+use crate::tools_m5::*;
 use crate::types::*;
 use crate::tools_m3::*;
 use schemars::JsonSchema;
@@ -333,6 +334,14 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "list_resources", toolset: "app", mutating: false, agent: true },
     ToolSpec { name: "read_resource", toolset: "app", mutating: false, agent: true },
     ToolSpec { name: "object_stats", toolset: "diagnostics", mutating: false, agent: true },
+    // M5 diagnostics: `read_events` and `read_logs` are answered from the broker's ring buffers.
+    ToolSpec { name: "watch", toolset: "diagnostics", mutating: false, agent: true },
+    ToolSpec { name: "read_events", toolset: "diagnostics", mutating: false, agent: false },
+    ToolSpec { name: "unwatch", toolset: "diagnostics", mutating: false, agent: true },
+    ToolSpec { name: "read_logs", toolset: "diagnostics", mutating: false, agent: false },
+    ToolSpec { name: "measure_frames", toolset: "diagnostics", mutating: false, agent: true },
+    ToolSpec { name: "record", toolset: "diagnostics", mutating: false, agent: true },
+    ToolSpec { name: "stop_recording", toolset: "diagnostics", mutating: false, agent: true },
 ];
 
 pub fn tool_spec(name: &str) -> Option<&'static ToolSpec> {
@@ -415,6 +424,13 @@ pub fn parse_params(tool: &str, args: Value) -> Result<(), String> {
         "list_resources" => chk!(ListResourcesParams),
         "read_resource" => chk!(ReadResourceParams),
         "object_stats" => chk!(ObjectStatsParams),
+        "watch" => chk!(WatchParams),
+        "read_events" => chk!(ReadEventsParams),
+        "unwatch" => chk!(UnwatchParams),
+        "read_logs" => chk!(ReadLogsParams),
+        "measure_frames" => chk!(MeasureFramesParams),
+        "record" => chk!(RecordParams),
+        "stop_recording" => chk!(StopRecordingParams),
         other => Err(format!("unknown tool '{other}'")),
     }
 }

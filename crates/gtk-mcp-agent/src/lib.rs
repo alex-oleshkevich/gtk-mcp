@@ -6,6 +6,9 @@
 pub mod actions;
 pub mod agent;
 pub mod config;
+pub mod diag;
+pub mod hooks;
+pub mod logs;
 pub mod json;
 pub mod layer;
 pub mod registry;
@@ -21,6 +24,7 @@ use gtk4 as gtk;
 use gtk4::prelude::*;
 
 pub use actions::register_action_group;
+pub use logs::forward_log;
 pub use secrecy::mark_secret;
 pub use state::{register_settings, register_state};
 
@@ -36,6 +40,7 @@ pub fn attach(app: &impl IsA<gtk::Application>) {
     // GTK may legitimately not be initialized yet (plain gtk-rs apps initialize it in
     // `GApplication::startup`); the executor re-checks before every request.
     agent::ensure_gtk_rs_initialized();
+    logs::activate();
     let app: gtk::Application = app.upcast_ref::<gtk::Application>().clone();
     let (tx, rx) = async_channel::unbounded::<socket::Incoming>();
     let agent = Agent::new(app.clone(), config);

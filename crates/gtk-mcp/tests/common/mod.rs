@@ -22,6 +22,8 @@ pub enum Step {
     Progress(f64, Option<f64>),
     /// `$/event` notification with these params.
     Event(Value),
+    /// `$/log` notification with these params.
+    Log(Value),
     /// `$/late_result {id, result}`
     LateResult(Value),
     Respond(Value),
@@ -162,6 +164,7 @@ fn run_script(w: Arc<Mutex<UnixStream>>, req: Request, steps: Vec<Step>) {
                 write(&w, &Notification::new(method::PROGRESS, json!({ "id": req.id, "progress": p, "total": t, "message": "working" })))
             }
             Step::Event(v) => write(&w, &Notification::new(method::EVENT, v)),
+            Step::Log(v) => write(&w, &Notification::new(method::LOG, v)),
             Step::LateResult(v) => write(&w, &Notification::new(method::LATE_RESULT, json!({ "id": req.id, "result": v }))),
             Step::Respond(v) => write(&w, &Response::ok(req.id, v)),
             Step::RespondFn(f) => write(&w, &Response::ok(req.id, f(&req))),

@@ -211,6 +211,20 @@ installation aborts). Logs come from:
 
 Otherwise `read_logs` reports `unavailable`.
 
+```rust
+// In the app's own writer (installed once, by the app, never by the agent):
+glib::log_set_writer_func(|level, fields| {
+    crate::mcp::forward_log(level, fields); // thread-safe; no-op when the agent is inactive
+    glib::log_writer_default(level, fields)
+});
+```
+
+The forwarded record is `{level, domain, message, fields}` (`GLIB_DOMAIN` and
+`MESSAGE` are lifted out; other string fields stay in `fields`, binary fields
+are skipped). Records forwarded before a broker connects are kept (512) and
+delivered at the handshake. `forward_log` is a Rust API; the C ABI has no
+wrapper yet.
+
 ## What `attach` does
 
 ```rust

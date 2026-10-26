@@ -28,6 +28,9 @@ pub mod snapshot;
 pub mod text;
 pub mod wait;
 pub mod windows;
+pub mod frames;
+pub mod record;
+pub mod watch;
 
 pub fn parse<T: DeserializeOwned>(tool: &str, params: Value) -> Result<T, AgentError> {
     serde_json::from_value(params).map_err(|e| AgentError::invalid_params(format!("invalid params for {tool}: {e}")))
@@ -75,6 +78,12 @@ pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -
         "list_resources" => app::list_resources(parse(tool, params)?),
         "read_resource" => app::read_resource(parse(tool, params)?),
         "object_stats" => app::object_stats(agent, parse(tool, params)?),
+        // diagnostics (M5)
+        "watch" => watch::watch(agent, parse(tool, params)?, ctx),
+        "unwatch" => watch::unwatch(parse(tool, params)?, ctx),
+        "measure_frames" => frames::measure_frames(agent, parse(tool, params)?, ctx).await,
+        "record" => record::record(agent, parse(tool, params)?, ctx),
+        "stop_recording" => record::stop_recording(agent, parse(tool, params)?, ctx),
         other => Err(AgentError::new(
             gtk_mcp_protocol::ErrorCode::NotFound,
             format!("method '{other}' is not implemented by this agent"),
