@@ -43,6 +43,13 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     root.set_margin_start(12);
     root.set_margin_end(12);
     root.append(&counter);
+    // Reports GTK_MCP* variables still visible to std::env after attach (must be none).
+    let leaked: Vec<String> = std::env::vars().map(|(k, _)| k).filter(|k| k.starts_with("GTK_MCP")).collect();
+    let env_report = named(
+        gtk::Label::new(Some(&format!("gtk-mcp-env: {}", if leaked.is_empty() { "none".to_string() } else { leaked.join(",") }))),
+        "env-report",
+    );
+    root.append(&env_report);
 
     // Collapsed expander with an entry child (detached content, AC-2/AC-4/AC-5).
     let expander = named(gtk::Expander::new(Some("Advanced options")), "advanced-expander");
@@ -228,10 +235,10 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
 }
 
 fn main() -> glib::ExitCode {
-    let app = adw::Application::builder()
-        .application_id("dev.gtkmcp.Fixture")
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
-        .build();
+    // FIXTURE_UNIQUE=1 keeps GApplication uniqueness, so a second instance is a
+    // remote one (it never emits `startup`, hence never binds a socket).
+    let flags = if std::env::var_os("FIXTURE_UNIQUE").is_some() { gio::ApplicationFlags::empty() } else { gio::ApplicationFlags::NON_UNIQUE };
+    let app = adw::Application::builder().application_id("dev.gtkmcp.Fixture").flags(flags).build();
     gtk_mcp_agent::attach(&app);
     let quit = gio::SimpleAction::new("quit", None);
     {
