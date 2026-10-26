@@ -118,7 +118,7 @@ fn stdio_lists_all_18_tools_with_annotations() {
     let mut c = Client::start(dir.path(), &[]);
     let tools = c.tools();
     let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    let expected: BTreeSet<&str> = TOOLS.iter().map(|t| t.name).collect();
+    let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core").map(|t| t.name).collect();
     assert_eq!(tools.len(), 18);
     assert_eq!(names, expected);
     for t in &tools {
@@ -134,6 +134,17 @@ fn stdio_lists_all_18_tools_with_annotations() {
         }
     }
     assert!(tools.iter().any(|t| t["name"] == "batch" && t["annotations"]["readOnlyHint"] != true));
+}
+
+#[test]
+fn stdio_toolsets_actions_adds_the_nine_actions_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::start(dir.path(), &["--toolsets", "core,actions"]);
+    let tools = c.tools();
+    assert_eq!(tools.len(), 27);
+    for n in ["list_actions", "activate_shortcut", "inspect_controllers"] {
+        assert!(tools.iter().any(|t| t["name"] == n), "{n}");
+    }
 }
 
 #[test]
