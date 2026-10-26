@@ -76,7 +76,7 @@ Two flags are worth knowing early. `--toolsets` chooses which tools the client s
 
 ## Security
 
-The agent stays off without `GTK_MCP=1`. The socket is readable only by your user, and the broker checks the peer's uid before it talks. Password fields and anything you mark secret never appear in responses, not even their length, and captures refuse a password field while it is showing its text. Captures can still show other sensitive pixels, so do not enable the agent on a session with real credentials on screen.
+The agent stays off without `GTK_MCP=1`. The socket is readable only by your user, and the broker checks that the peer runs as your user and is the process the socket is named after before it talks. Password fields and anything you mark secret never appear in responses, not even their length, and captures refuse a password field while it is showing its text. Captures can still show other sensitive pixels, so do not enable the agent on a session with real credentials on screen.
 
 ## More
 
