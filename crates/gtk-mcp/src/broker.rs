@@ -2,6 +2,7 @@
 //! `server.rs` wraps [`Broker::call_tool`] for rmcp.
 
 use crate::diff;
+use crate::launch::{self, Launch};
 use crate::policy::{Config, Policy};
 use crate::session::{HandshakeError, ProgressSink, Session, handshake};
 use base64::Engine;
@@ -36,7 +37,7 @@ impl ToolOutcome {
     fn text(s: impl Into<String>) -> Self {
         Self { contents: vec![Content::Text(s.into())] }
     }
-    fn json(v: &Value) -> Self {
+    pub(crate) fn json(v: &Value) -> Self {
         Self::text(serde_json::to_string_pretty(v).unwrap_or_default())
     }
     /// The first text content.
@@ -57,16 +58,18 @@ impl ToolOutcome {
 }
 
 pub struct Broker {
-    policy: Policy,
-    config: Config,
+    pub(crate) policy: Policy,
+    pub(crate) config: Config,
     enabled: HashSet<&'static str>,
-    sessions: Mutex<Vec<Arc<Session>>>,
+    pub(crate) sessions: Mutex<Vec<Arc<Session>>>,
+    /// Apps this broker launched (`launch.rs`); each is adopted by the session whose socket appears in its process group.
+    pub(crate) launches: Mutex<Vec<Arc<Launch>>>,
     next_session: AtomicU64,
     exit_counter: Arc<AtomicU64>,
     scan_lock: Mutex<()>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -92,6 +95,7 @@ impl Broker {
             config,
             enabled,
             sessions: Mutex::new(Vec::new()),
+            launches: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
             exit_counter: Arc::new(AtomicU64::new(0)),
             scan_lock: Mutex::new(()),
@@ -122,7 +126,26 @@ impl Broker {
             let drop_ids: HashSet<String> = exited.into_iter().take(drop_n).map(|(_, id)| id).collect();
             g.retain(|s| !drop_ids.contains(s.id()));
         }
+        // A finished launch is only kept while a session still refers to it.
+        lock(&self.launches).retain(|l| !l.reaped() || g.iter().any(|s| s.launch().is_some_and(|sl| Arc::ptr_eq(sl, l))));
         g.clone()
+    }
+
+    /// The unclaimed launch whose process group contains `pid`, claimed for its session.
+    fn adopt_launch(&self, pid: u32) -> Option<Arc<Launch>> {
+        // SAFETY: plain query; -1 when the process is gone.
+        let pgid = unsafe { libc::getpgid(pid as i32) };
+        if pgid <= 0 {
+            return None;
+        }
+        lock(&self.launches).iter().find(|l| l.pid() as i32 == pgid && l.claim()).cloned()
+    }
+
+    /// Terminate every app this broker still runs (SIGTERM, SIGKILL after 500 ms).
+    /// Also done when the broker is dropped.
+    pub fn shutdown(&self) {
+        let all = lock(&self.launches).clone();
+        launch::terminate_all(&all);
     }
 
     pub fn session_infos(&self) -> Vec<SessionInfo> {
@@ -168,6 +191,7 @@ impl Broker {
             match handshake(&path, self.config.handshake_timeout) {
                 Ok(h) => {
                     let id = format!("s{}", self.next_session.fetch_add(1, Ordering::Relaxed));
+                    let launch = self.adopt_launch(pid);
                     let s = Session::new(
                         id,
                         pid,
@@ -176,6 +200,7 @@ impl Broker {
                         self.config.retain_snapshots,
                         self.config.retain_captures,
                         self.exit_counter.clone(),
+                        launch,
                     );
                     lock(&self.sessions).push(s);
                 }
@@ -245,7 +270,10 @@ impl Broker {
 
         if name == "list_apps" {
             self.rescan().await;
-            return Ok(ToolOutcome::json(&serde_json::to_value(self.session_infos()).unwrap()));
+            return Ok(ToolOutcome::json(&Value::Array(self.sessions().iter().map(|s| s.listing()).collect())));
+        }
+        if matches!(name, "launch_app" | "restart_app" | "stop_app") {
+            return self.lifecycle(name, args).await;
         }
 
         // Everything that can be wrong with the params is wrong before anything is sent.
@@ -386,6 +414,12 @@ impl Broker {
         let mut contents = vec![Content::Text(serde_json::to_string_pretty(&d.report).unwrap_or_default())];
         contents.extend(d.image.map(Content::Png));
         Ok(ToolOutcome { contents })
+    }
+}
+
+impl Drop for Broker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 

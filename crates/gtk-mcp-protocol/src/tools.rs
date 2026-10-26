@@ -5,6 +5,7 @@
 //! ignores it. Inside a `batch` step the agent injects the batch's session
 //! before parsing, so step arguments never repeat it.
 
+use crate::tools_m4::*;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -301,6 +302,16 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "inspect_model", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "capture", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "diff_captures", toolset: "core", mutating: false, agent: false },
+    // M4: lifecycle tools run in the broker (gated by `--allow-launch`, not by mutations).
+    ToolSpec { name: "launch_app", toolset: "core", mutating: true, agent: false },
+    ToolSpec { name: "restart_app", toolset: "core", mutating: true, agent: false },
+    ToolSpec { name: "stop_app", toolset: "core", mutating: true, agent: false },
+    ToolSpec { name: "app_open", toolset: "app", mutating: true, agent: true },
+    ToolSpec { name: "inspect_gsettings", toolset: "app", mutating: false, agent: true },
+    ToolSpec { name: "set_gsetting", toolset: "app", mutating: true, agent: true },
+    ToolSpec { name: "list_resources", toolset: "app", mutating: false, agent: true },
+    ToolSpec { name: "read_resource", toolset: "app", mutating: false, agent: true },
+    ToolSpec { name: "object_stats", toolset: "diagnostics", mutating: false, agent: true },
 ];
 
 pub fn tool_spec(name: &str) -> Option<&'static ToolSpec> {
@@ -356,6 +367,15 @@ pub fn parse_params(tool: &str, args: Value) -> Result<(), String> {
         "inspect_model" => chk!(InspectModelParams),
         "capture" => chk!(CaptureParams),
         "diff_captures" => chk!(DiffCapturesParams),
+        "launch_app" => chk!(LaunchAppParams),
+        "restart_app" => chk!(RestartAppParams),
+        "stop_app" => chk!(StopAppParams),
+        "app_open" => chk!(AppOpenParams),
+        "inspect_gsettings" => chk!(InspectGsettingsParams),
+        "set_gsetting" => chk!(SetGsettingParams),
+        "list_resources" => chk!(ListResourcesParams),
+        "read_resource" => chk!(ReadResourceParams),
+        "object_stats" => chk!(ObjectStatsParams),
         other => Err(format!("unknown tool '{other}'")),
     }
 }

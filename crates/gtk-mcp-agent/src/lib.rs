@@ -11,6 +11,7 @@ pub mod registry;
 pub mod secrecy;
 pub mod selector;
 pub mod socket;
+pub mod state;
 pub mod tools;
 pub mod widgets;
 
@@ -19,6 +20,7 @@ use gtk4 as gtk;
 use gtk4::prelude::*;
 
 pub use secrecy::mark_secret;
+pub use state::{register_settings, register_state};
 
 /// Attach the agent to `app`. Must be called on the main thread after
 /// `gtk::init`. Inert (and idempotent) unless `GTK_MCP=1`; always removes

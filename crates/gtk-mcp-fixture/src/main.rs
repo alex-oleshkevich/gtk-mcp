@@ -10,6 +10,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+mod m4;
+
 thread_local! {
     /// Strong reference that keeps a removed widget alive until "finalize-widget".
     static VICTIM: RefCell<Option<gtk::Label>> = const { RefCell::new(None) };
@@ -226,6 +228,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     root.append(&columns);
 
     build_interact_extras(&root);
+    m4::extras(&root, app);
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&root));
     scroll.set_vexpand(true);
@@ -268,8 +271,10 @@ fn main() -> glib::ExitCode {
     // FIXTURE_UNIQUE=1 keeps GApplication uniqueness, so a second instance is a
     // remote one (it never emits `startup`, hence never binds a socket).
     let flags = if std::env::var_os("FIXTURE_UNIQUE").is_some() { gio::ApplicationFlags::empty() } else { gio::ApplicationFlags::NON_UNIQUE };
+    let flags = flags | gio::ApplicationFlags::HANDLES_OPEN;
     let app = adw::Application::builder().application_id("dev.gtkmcp.Fixture").flags(flags).build();
     gtk_mcp_agent::attach(&app);
+    m4::init_app(&app);
     let quit = gio::SimpleAction::new("quit", None);
     {
         let app = app.clone();
@@ -277,6 +282,10 @@ fn main() -> glib::ExitCode {
     }
     app.add_action(&quit);
     app.connect_activate(|app| {
+        if let Some(existing) = app.active_window() {
+            existing.present();
+            return;
+        }
         let win = build_window(app);
         win.present();
     });
