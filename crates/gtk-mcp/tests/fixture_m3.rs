@@ -412,6 +412,13 @@ fn find_text_nodes<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
     }
 }
 
+fn all_nodes<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
+    out.push(v);
+    for c in v["children"].as_array().into_iter().flatten() {
+        all_nodes(c, out);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn render_tree_is_limited_and_keeps_secrets_out() {
     let display = require_display!();
@@ -442,6 +449,8 @@ async fn render_tree_is_limited_and_keeps_secrets_out() {
     for id in ["password", "password-row"] {
         // Widgets scrolled out of the viewport have no render node in the last frame.
         c.json("interact", json!({"target": by_id(id), "operation": "scroll_to"})).await;
+        // Focused: the caret (whose position encodes the length) is drawn.
+        c.json("interact", json!({"target": by_id(id), "operation": "focus"})).await;
         let r = c.json("inspect_render", json!({"target": by_id(id)})).await;
         let s = r.to_string();
         assert!(!s.contains(SECRET), "{id}: secret leaked");
@@ -451,12 +460,26 @@ async fn render_tree_is_limited_and_keeps_secrets_out() {
         assert!(texts.iter().all(|t| t["redacted"] == true && t.get("glyphs").is_none() && t.get("bounds").is_none()), "{id}: {r}");
         assert_eq!(r["redacted_text_nodes"].as_u64().unwrap() as usize, texts.len());
         assert!(r["secret_regions"].as_u64().unwrap() >= 1);
+        // No node inside the field keeps geometry or attributes (caret x, selection
+        // width and scroll offset encode the length).
+        let mut all = Vec::new();
+        all_nodes(&r["root"], &mut all);
+        for n in &all {
+            assert_eq!(n["redacted"], true, "{id}: {n}");
+            for k in ["bounds", "transform", "clip", "color", "child_bounds"] {
+                assert!(n.get(k).is_none(), "{id}: node keeps {k}: {n}");
+            }
+        }
     }
     // a window containing the secret field redacts it as well
     let win = c.json("list_windows", json!({})).await["windows"][0]["ref"].clone();
     let whole = c.json("inspect_render", json!({"target": win, "max_nodes": 5000})).await;
     assert!(!whole.to_string().contains(SECRET));
     assert!(whole["redacted_text_nodes"].as_u64().unwrap() >= 2, "{}", whole["redacted_text_nodes"]);
+    let mut all = Vec::new();
+    all_nodes(&whole["root"], &mut all);
+    assert!(all.iter().any(|n| n["redacted"] == true && n["type"] != "text"), "nodes inside the fields are withheld");
+    assert!(whole["root"]["bounds"].is_object(), "nodes outside secret fields keep their geometry");
 
     // peeking secret: refused, for the field and for any ancestor
     let pw = c.snapshot_json(json!({"root": by_id("password")})).await;

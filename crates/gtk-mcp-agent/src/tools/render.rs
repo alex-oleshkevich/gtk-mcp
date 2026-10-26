@@ -3,9 +3,12 @@
 //!
 //! The tree comes from a `GtkWidgetPaintable` snapshot, the same source as
 //! `capture`. Secrecy: targets whose subtree holds a secret object that is
-//! revealing its content are refused (`redacted`); text nodes that fall inside
-//! a secret widget are replaced and carry neither glyph count, font nor bounds
-//! (the glyph count of a password field is its length).
+//! revealing its content are refused (`redacted`); text nodes that touch a
+//! secret widget are replaced and carry neither glyph count, font nor bounds
+//! (the glyph count of a password field is its length), and every node inside
+//! a secret widget keeps only its type (caret, selection and scroll geometry
+//! encode the length too). When there are too many widgets to find every secret
+//! field, the whole target counts as secret.
 
 use crate::agent::{Agent, Ctx};
 use crate::registry::{ObjState, widget_state};
@@ -195,7 +198,14 @@ fn overlaps_secret(w: &Walk, abs: &graphene::Rect) -> bool {
     w.whole_secret || w.secret_regions.iter().any(|r| r.intersection(abs).is_some())
 }
 
-fn serialize(node: &gsk::RenderNode, acc: &gsk::Transform, depth: u32, w: &mut Walk) -> Option<Value> {
+fn inside_secret(w: &Walk, abs: &graphene::Rect) -> bool {
+    w.whole_secret || w.secret_regions.iter().any(|r| r.contains_rect(abs))
+}
+
+/// `inside`: an ancestor lies inside a secret region. Such nodes, and nodes that
+/// lie inside one themselves, keep only their type: the caret position, the
+/// selection width or the scroll offset of a secret field encode its length.
+fn serialize(node: &gsk::RenderNode, acc: &gsk::Transform, depth: u32, inside: bool, w: &mut Walk) -> Option<Value> {
     if w.nodes_left == 0 {
         w.truncated = true;
         return None;
@@ -203,21 +213,24 @@ fn serialize(node: &gsk::RenderNode, acc: &gsk::Transform, depth: u32, w: &mut W
     w.nodes_left -= 1;
     w.emitted += 1;
     let label = type_label(node);
-    if node.node_type() == RenderNodeType::TextNode {
-        let abs = acc.transform_bounds(&node.bounds());
-        if overlaps_secret(w, &abs) {
-            w.redacted_text += 1;
-            return Some(json!({"type": label, "redacted": true}));
-        }
+    let abs = acc.transform_bounds(&node.bounds());
+    let inside = inside || inside_secret(w, &abs);
+    if node.node_type() == RenderNodeType::TextNode && (inside || overlaps_secret(w, &abs)) {
+        w.redacted_text += 1;
+        return Some(json!({"type": label, "redacted": true}));
     }
     let mut attrs = Map::new();
     let (children, omitted) = describe(node, &mut attrs);
     let mut m = Map::new();
     m.insert("type".into(), json!(label));
-    m.insert("bounds".into(), rect_json(&node.bounds()));
-    m.extend(attrs);
-    if omitted {
-        m.insert("children_omitted".into(), json!(true));
+    if inside {
+        m.insert("redacted".into(), json!(true));
+    } else {
+        m.insert("bounds".into(), rect_json(&node.bounds()));
+        m.extend(attrs);
+        if omitted {
+            m.insert("children_omitted".into(), json!(true));
+        }
     }
     if !children.is_empty() {
         if depth + 1 >= w.max_depth {
@@ -230,7 +243,7 @@ fn serialize(node: &gsk::RenderNode, acc: &gsk::Transform, depth: u32, w: &mut W
                     Some(t) => acc.clone().transform(Some(t)),
                     None => acc.clone(),
                 };
-                match serialize(&child, &child_acc, depth + 1, w) {
+                match serialize(&child, &child_acc, depth + 1, inside, w) {
                     Some(v) => out.push(v),
                     None => break,
                 }
@@ -241,30 +254,63 @@ fn serialize(node: &gsk::RenderNode, acc: &gsk::Transform, depth: u32, w: &mut W
     Some(Value::Object(m))
 }
 
+/// Bounds of the outermost secret nodes below `root` (exclusive), in tree
+/// order. `None` when the walk would visit more than `budget` nodes: the caller
+/// then treats the whole target as secret instead of missing a field.
+fn secret_regions_of<N>(
+    root: &N,
+    budget: usize,
+    children: &dyn Fn(&N) -> Vec<N>,
+    secret_bounds: &dyn Fn(&N) -> Option<Option<graphene::Rect>>,
+) -> Option<Vec<graphene::Rect>> {
+    fn walk<N>(
+        n: &N,
+        budget: &mut usize,
+        children: &dyn Fn(&N) -> Vec<N>,
+        secret_bounds: &dyn Fn(&N) -> Option<Option<graphene::Rect>>,
+        out: &mut Vec<graphene::Rect>,
+    ) -> bool {
+        for child in children(n) {
+            if *budget == 0 {
+                return false;
+            }
+            *budget -= 1;
+            match secret_bounds(&child) {
+                Some(b) => out.extend(b),
+                None => {
+                    if !walk(&child, budget, children, secret_bounds, out) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+    let mut out = Vec::new();
+    let mut budget = budget;
+    walk(root, &mut budget, children, secret_bounds, &mut out).then_some(out)
+}
+
 /// Bounds (relative to `root`'s own bounds origin) of the secret widgets under
-/// `root`; the caller handles the case that `root` itself is secret.
-fn secret_regions(root: &gtk::Widget, origin: &graphene::Rect) -> Vec<graphene::Rect> {
-    fn walk(w: &gtk::Widget, root: &gtk::Widget, origin: &graphene::Rect, budget: &mut usize, out: &mut Vec<graphene::Rect>) {
+/// `root`; `None` when there are too many widgets to tell. The caller handles
+/// the case that `root` itself is secret.
+fn secret_regions(root: &gtk::Widget, origin: &graphene::Rect) -> Option<Vec<graphene::Rect>> {
+    let children = |w: &gtk::Widget| {
+        let mut v = Vec::new();
         let mut c = w.first_child();
         while let Some(child) = c {
             c = child.next_sibling();
-            if *budget == 0 {
-                return;
-            }
-            *budget -= 1;
-            if secrecy::is_secret(&child) {
-                if let Some(b) = child.compute_bounds(root) {
-                    out.push(graphene::Rect::new(b.x() - origin.x(), b.y() - origin.y(), b.width(), b.height()));
-                }
-            } else {
-                walk(&child, root, origin, budget, out);
-            }
+            v.push(child);
         }
-    }
-    let mut out = Vec::new();
-    let mut budget = MAX_WALK;
-    walk(root, root, origin, &mut budget, &mut out);
-    out
+        v
+    };
+    let secret_bounds = |w: &gtk::Widget| {
+        secrecy::is_secret(w).then(|| {
+            w.compute_bounds(root)
+                .map(|b| graphene::Rect::new(b.x() - origin.x(), b.y() - origin.y(), b.width(), b.height()))
+        })
+    };
+    secret_regions_of(root, MAX_WALK, &children, &secret_bounds)
 }
 
 pub async fn inspect_render(agent: &Rc<Agent>, p: InspectRenderParams, ctx: &Ctx) -> Result<Value, AgentError> {
@@ -312,16 +358,18 @@ pub async fn inspect_render(agent: &Rc<Agent>, p: InspectRenderParams, ctx: &Ctx
         return Err(AgentError::new(ErrorCode::Redacted, format!("{r} now contains a secret field that is revealing its content")));
     }
 
+    // Too many widgets to find every secret field: treat the whole target as secret.
+    let regions = secret_regions(&w, &bounds);
     let mut walk = Walk {
         nodes_left: max_nodes,
         max_depth,
         truncated: false,
-        secret_regions: secret_regions(&w, &bounds),
-        whole_secret: secrecy::is_secret(&w),
+        whole_secret: secrecy::is_secret(&w) || regions.is_none(),
+        secret_regions: regions.unwrap_or_default(),
         redacted_text: 0,
         emitted: 0,
     };
-    let tree = serialize(&node, &gsk::Transform::new(), 0, &mut walk).unwrap_or(Value::Null);
+    let tree = serialize(&node, &gsk::Transform::new(), 0, false, &mut walk).unwrap_or(Value::Null);
     Ok(json!({
         "target": r,
         "size": {"width": bounds.width(), "height": bounds.height()},
@@ -331,7 +379,43 @@ pub async fn inspect_render(agent: &Rc<Agent>, p: InspectRenderParams, ctx: &Ctx
         "max_depth": max_depth,
         "secret_regions": walk.secret_regions.len() + usize::from(walk.whole_secret),
         "redacted_text_nodes": walk.redacted_text,
-        "notes": ["text nodes carry glyph ids, not characters: only glyph count, font and colour are listed"],
+        "notes": [
+            "text nodes carry glyph ids, not characters: only glyph count, font and colour are listed",
+            "nodes inside a secret field keep only their type (redacted: true)",
+        ],
         "root": tree,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct N {
+        secret: bool,
+        kids: Vec<N>,
+    }
+
+    fn leaf(secret: bool) -> N {
+        N { secret, kids: vec![] }
+    }
+
+    fn kids<'a>(n: &&'a N) -> Vec<&'a N> {
+        n.kids.iter().collect()
+    }
+
+    fn regions(root: &N, budget: usize) -> Option<usize> {
+        let secret = |n: &&N| n.secret.then(|| Some(graphene::Rect::new(0.0, 0.0, 1.0, 1.0)));
+        secret_regions_of(&root, budget, &kids, &secret).map(|v| v.len())
+    }
+
+    #[test]
+    fn secret_regions_fail_closed_when_the_budget_runs_out() {
+        // root -> [plain -> [secret], secret]: 3 widgets visited (the secret's own
+        // children never are).
+        let tree = N { secret: false, kids: vec![N { secret: false, kids: vec![leaf(true)] }, leaf(true)] };
+        assert_eq!(regions(&tree, 3), Some(2));
+        assert_eq!(regions(&tree, 2), None, "a secret beyond the budget must not be missed silently");
+        assert_eq!(regions(&leaf(false), 0), Some(0));
+    }
 }

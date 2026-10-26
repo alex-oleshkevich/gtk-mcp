@@ -91,7 +91,9 @@ As built (M3):
   remove all of them.
 - `inspect_render`: text nodes carry glyph count, font and colour (the bindings
   expose no characters). Text nodes overlapping a secret widget are replaced by
-  `{"type":"text","redacted":true}`; peeking secrets refuse the call.
+  `{"type":"text","redacted":true}`; every other node inside a secret widget
+  keeps only its type (`redacted: true`), since caret, selection and scroll
+  geometry encode the length. Peeking secrets refuse the call.
 - `override_setting`: `setting` is `color_scheme`, `animations`, `text_scale`
   (factor of the pre-override `gtk-xft-dpi`) or `text_direction`; `reset:true`
   restores one setting. Overrides are reverted when the last client holding
