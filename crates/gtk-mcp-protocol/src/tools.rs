@@ -286,7 +286,7 @@ pub struct ToolSpec {
 
 pub const TOOLSETS: &[&str] = &["core", "actions", "layout-style", "a11y", "diagnostics", "app"];
 
-/// Tools registered by this build (milestones M0 and M1).
+/// Tools registered by this build; toolset and policy filtering happens in the broker.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "list_apps", toolset: "core", mutating: false, agent: false },
     ToolSpec { name: "list_windows", toolset: "core", mutating: false, agent: true },

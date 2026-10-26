@@ -299,6 +299,12 @@ impl Broker {
             }
             _ => {}
         }
+        if name == "unwatch" && args["subscription"] == "atspi" {
+            if !self.unwatch_atspi(session.id()) {
+                return Err(AgentError::new(ErrorCode::NotFound, "no AT-SPI subscription for this session"));
+            }
+            return Ok(ToolOutcome::json(&serde_json::json!({"subscription": "atspi", "removed": true})));
+        }
         if let Some(e) = session.unavailable() {
             return Err(e);
         }
@@ -315,6 +321,14 @@ impl Broker {
                     format!("'{name}' mutates the app; start session {} with GTK_MCP_MUTATIONS=1", session.id()),
                 ));
             }
+        }
+        if name == "watch" && args["kind"] == "atspi" {
+            let p: gtk_mcp_protocol::WatchParams = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
+            if p.target.is_some() {
+                return Err(invalid("AT-SPI watches are app-wide; omit target"));
+            }
+            let gtk_mcp_protocol::WatchKind::Atspi { events } = p.watch else { unreachable!() };
+            return self.watch_atspi(&session, events).await.map(|v| ToolOutcome::json(&v));
         }
 
         if matches!(name, "accessible_tree" | "inspect_accessible" | "audit_accessibility") {

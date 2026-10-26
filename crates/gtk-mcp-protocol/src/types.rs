@@ -314,7 +314,7 @@ pub struct CaptureParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settle: Option<bool>, // default true
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settle_timeout_ms: Option<u64>, // default 1000
+    pub settle_timeout_ms: Option<u64>, // default 2000
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotate: Option<bool>, // overlay refs of visible descendants
     #[serde(default, skip_serializing_if = "Option::is_none")]

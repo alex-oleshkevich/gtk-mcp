@@ -10,7 +10,7 @@ use rmcp::{
 
 #[tool_router(router = tool_router_diagnostics, vis = "pub(super)")]
 impl Server {
-    #[tool(description = "Subscribe to events on a target; they accumulate in the broker and are read with read_events. kind=notify (properties optional: all), kind=signal (signal name; see list_signals watch.eligible), kind=model (items-changed, and selection-changed for selection models). Secret objects report names only, never values. Returns a subscription id for unwatch.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    #[tool(description = "Subscribe to events read with read_events. kind=notify (target, optional properties), signal (target, signal name), model (target), or atspi (app-wide; omit target; optional events prefixes such as object:state-changed:focused; requires --allow-atspi). AT-SPI has one subscription per session; another watch replaces it. Secret objects never report values. Returns a subscription id for unwatch.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
     async fn watch(&self, Parameters(p): Parameters<WatchParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("watch", p, ctx).await
     }

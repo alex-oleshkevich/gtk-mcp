@@ -229,7 +229,8 @@ fn watch_model(
 }
 
 pub fn watch(agent: &Rc<Agent>, p: WatchParams, ctx: &Ctx) -> Result<Value, AgentError> {
-    let obj = selector::resolve_object(agent, &p.target)?;
+    let target = p.target.as_ref().ok_or_else(|| AgentError::invalid_params("target is required for agent watches"))?;
+    let obj = selector::resolve_object(agent, target)?;
     if SUBS.with(|s| s.borrow().len()) >= MAX_SUBSCRIPTIONS {
         return Err(AgentError::invalid_params(format!("at most {MAX_SUBSCRIPTIONS} subscriptions; unwatch some first")));
     }
@@ -243,6 +244,7 @@ pub fn watch(agent: &Rc<Agent>, p: WatchParams, ctx: &Ctx) -> Result<Value, Agen
         WatchKind::Notify { properties } => watch_notify(agent, &obj, properties, &ctx.conn, &id, &mut cleanup),
         WatchKind::Signal { signal } => watch_signal(&obj, signal, &ctx.conn, &id, &mut cleanup),
         WatchKind::Model => watch_model(agent, &obj, &ctx.conn, &id, &mut cleanup),
+        WatchKind::Atspi { .. } => Err(AgentError::invalid_params("AT-SPI watches are handled by the broker")),
     };
     let detail = match detail {
         Ok(d) => d,

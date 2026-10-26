@@ -420,9 +420,10 @@ async fn a11y_focus_event_carries_the_joined_ref() {
     let tree = wait_exported(&c).await;
     let target = by_auto(&tree, "a11y-tab-2")["ref"].as_str().unwrap().to_string();
 
-    let session = c.broker.resolve_session("").await.unwrap();
-    let start = session.events_since(0).next_cursor;
-    c.broker.watch_atspi(&session, Some(vec!["object:state-changed:focused".into()])).await.expect("watch_atspi");
+    let start = c.json("read_events", json!({})).await["next_cursor"].as_u64().unwrap();
+    let watch = c.json("watch", json!({"kind": "atspi", "events": ["object:state-changed:focused"]})).await;
+    assert_eq!(watch["source"], "atspi");
+    let subscription = watch["subscription"].as_str().unwrap();
 
     // Wait for a focus event on the target after moving focus there.
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -432,14 +433,23 @@ async fn a11y_focus_event_carries_the_joined_ref() {
         c.json("interact", json!({"target": by_id("a11y-tab-1"), "operation": "focus"})).await;
         c.json("interact", json!({"target": by_id("a11y-tab-2"), "operation": "focus"})).await;
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let read = session.events_since(cursor);
-        cursor = read.next_cursor;
-        found = read.entries.into_iter().map(|e| e.value).find(|v| v["kind"] == "atspi" && v["ref"] == target.as_str() && v["detail1"] == 1);
+        let read = c.json("read_events", json!({"since": cursor, "subscription": subscription, "kind": "atspi"})).await;
+        cursor = read["next_cursor"].as_u64().unwrap();
+        found = read["entries"].as_array().unwrap().iter().find(|v| v["ref"] == target.as_str() && v["detail1"] == 1).cloned();
     }
     let ev = found.expect("no AT-SPI focus event mapped to the focused button");
     assert_eq!(ev["source"], "atspi");
     assert_eq!(ev["event"], "object:state-changed:focused");
     assert_eq!(ev["role"], "button");
     assert_eq!(ev["name"], "Second");
-    assert!(c.broker.unwatch_atspi(session.id()));
+    let removed = c.json("unwatch", json!({"subscription": subscription})).await;
+    assert_eq!(removed["removed"], true);
+    assert_eq!(c.err("unwatch", json!({"subscription": subscription})).await.code, gtk_mcp_protocol::ErrorCode::NotFound);
+    let stopped = c.json("read_events", json!({"kind": "atspi"})).await["next_cursor"].as_u64().unwrap();
+    c.json("interact", json!({"target": by_id("a11y-tab-1"), "operation": "focus"})).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(c.json("read_events", json!({"since": stopped, "kind": "atspi"})).await["entries"].as_array().unwrap().is_empty());
+
+    let ro = broker(&fx, bus, false, true);
+    assert_eq!(ro.err("watch", json!({"kind": "atspi"})).await.code, gtk_mcp_protocol::ErrorCode::Unavailable);
 }

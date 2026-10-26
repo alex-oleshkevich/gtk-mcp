@@ -132,7 +132,7 @@ Secret widgets never expose name, text or value.
 | `record` | R | Start recording interactions (input-attributed emission hooks, `plan.md` 5.6) |
 | `stop_recording` | R | Return a replayable `batch` script with selectors and secret placeholders; app-originated emissions listed separately |
 
-As built (M5):
+As built (M5/M6):
 
 - `watch` takes `target` plus `kind`: `notify` (`properties`, default every
   property; `GObject::notify` is not hookable, so this uses
@@ -141,7 +141,18 @@ As built (M5):
   `model` (`items-changed`, plus `selection-changed` for selection models; the
   target is a model or a widget with a `model` property). It returns a
   `subscription` id. Subscriptions belong to the connection and disappear on
-  disconnect; at most 256. The AT-SPI event source is M6 (`gm-xae.6`).
+  disconnect; at most 256.
+- `watch {kind: "atspi", events?: ["object:state-changed:focused"]}` omits
+  `target` and watches the whole app through the broker's AT-SPI source
+  (`--allow-atspi` required). `events` filters by event-name prefix; omitted
+  or empty selects focus, state, accessible-name and window events. One
+  subscription (`"atspi"`) exists per session; another AT-SPI watch replaces
+  it. `unwatch {subscription: "atspi"}` stops it, including after app exit.
+  Records in `read_events` have `{kind: "atspi", source: "atspi",
+  subscription: "atspi", event, detail1, detail2, path, ref, role, name}`;
+  `ref` is the joined widget ref or null. Secret widgets omit `name` and
+  carry `secret: true`. The subscription and kind filters work for these
+  broker-sourced records as for agent events.
 - Events are `$/event` notifications kept in the session's bounded ring:
   `{kind: notify|signal|items_changed|selection_changed, subscription, target,
   type, property|signal|position…, value|args, time_ms, by_agent}`. Events of

@@ -151,6 +151,7 @@ impl Broker {
                 let mut rec = json!({
                     "kind": "atspi",
                     "source": "atspi",
+                    "subscription": "atspi",
                     "event": event,
                     "detail1": d1,
                     "detail2": d2,
@@ -169,7 +170,7 @@ impl Broker {
         if let Some(old) = lock(&self.atspi_watches).insert(session.id().to_owned(), handle) {
             old.abort();
         }
-        Ok(json!({"session": session.id(), "source": "atspi", "events": kinds, "app_bus_name": app.bus}))
+        Ok(json!({"session": session.id(), "subscription": "atspi", "kind": "atspi", "source": "atspi", "events": kinds, "app_bus_name": app.bus}))
     }
 
     /// Stop the AT-SPI subscription of a session; `false` when there was none.

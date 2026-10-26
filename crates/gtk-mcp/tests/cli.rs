@@ -137,6 +137,16 @@ fn stdio_lists_all_core_tools_with_annotations() {
 }
 
 #[test]
+fn stdio_all_toolsets_list_56_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::start(dir.path(), &["--toolsets", "core,actions,layout-style,a11y,diagnostics,app"]);
+    let tools = c.tools();
+    assert_eq!(tools.len(), 56);
+    let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, TOOLS.iter().map(|t| t.name).collect());
+}
+
+#[test]
 fn stdio_layout_style_toolset_adds_nine_annotated_tools() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &["--toolsets", "core,layout-style"]);

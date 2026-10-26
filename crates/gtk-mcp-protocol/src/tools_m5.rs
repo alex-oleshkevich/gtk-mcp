@@ -33,6 +33,12 @@ pub enum WatchKind {
     /// `items-changed` of a list model and `selection-changed` of a selection
     /// model. The target is a model, or a widget with a `model` property.
     Model,
+    /// App-wide AT-SPI events (broker-side; requires `--allow-atspi`).
+    Atspi {
+        /// Event-name prefixes; omitted or empty: focus, state, name and window events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        events: Option<Vec<String>>,
+    },
 }
 
 impl WatchKind {
@@ -41,6 +47,7 @@ impl WatchKind {
             Self::Notify { .. } => "notify",
             Self::Signal { .. } => "signal",
             Self::Model => "model",
+            Self::Atspi { .. } => "atspi",
         }
     }
 }
@@ -49,7 +56,9 @@ impl WatchKind {
 pub struct WatchParams {
     #[serde(default = "default_session")]
     pub session: String,
-    pub target: Target,
+    /// Required for notify, signal and model; omitted for app-wide AT-SPI events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Target>,
     #[serde(flatten)]
     pub watch: WatchKind,
 }
@@ -74,7 +83,7 @@ pub struct ReadEventsParams {
     /// Only events of this subscription (`late_result` records are kept when `kind` is `late_result`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription: Option<String>,
-    /// Only events of this kind: `notify`, `signal`, `items_changed`, `selection_changed`, `late_result`.
+    /// Only events of this kind: `notify`, `signal`, `items_changed`, `selection_changed`, `atspi`, `late_result`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }
