@@ -687,6 +687,8 @@ Tool totals verified against `tools.md`: 56 tools, 17 mutating.
 
 ## 14. Durability
 
-`gtk-mcp/` is not yet a git repository. Before slicing into issues: initialize
-the repository, commit `docs/`, and create beads issues per milestone with
-`Source:` lines pointing at sections of this plan.
+Committed in the `gtk-mcp` git repository. Work is tracked in beads (prefix
+`gm`): one epic per milestone (M0 `gm-be2`, M1 `gm-1ms`, M2 `gm-96t`,
+M3 `gm-voc`, M4 `gm-7lm`, M5 `gm-et7`, M6 `gm-xae`, M7 `gm-7mz`, M8 `gm-itz`),
+with child issues whose descriptions start with a `Source:` line pointing at
+this plan or its companion documents, and `--spec-id docs/plan.md`.
