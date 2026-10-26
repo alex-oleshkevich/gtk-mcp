@@ -161,6 +161,14 @@ Re-registering a name replaces the previous closure. This is also how
 session-lock state is exposed: gtk4-session-lock has no getters the agent
 could call.
 
+Serving these to MCP clients is gated behind the broker's `app` toolset:
+start the broker with `--toolsets core,app` (the default is `core` only).
+Otherwise the broker does not advertise the resources capability and
+`resources/list` returns an empty list even though the app registered state.
+With the toolset on, each entry is exposed as the MCP resource
+`gtk-mcp://<session>/app-state/<name>` (JSON, e.g.
+`gtk-mcp://s1/app-state/panels`) and readable with `resources/read`.
+
 ### Secrets
 
 Detected without app code (`plan.md` 4.4): `GtkPasswordEntry`;
