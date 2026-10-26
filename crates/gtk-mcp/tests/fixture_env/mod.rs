@@ -264,7 +264,7 @@ impl Fixture {
         let t = Instant::now();
         while !sock.exists() {
             assert!(t.elapsed() < Duration::from_secs(30), "fixture socket did not appear in 30 s; stderr:\n{}", f.stderr());
-            if let Ok(Some(st)) = { let mut c = &mut f.child; c.try_wait() } {
+            if let Ok(Some(st)) = { let c = &mut f.child; c.try_wait() } {
                 panic!("fixture exited early ({st}); stderr:\n{}", f.stderr());
             }
             std::thread::sleep(Duration::from_millis(50));
