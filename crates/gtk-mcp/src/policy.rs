@@ -13,7 +13,7 @@ pub struct Policy {
     pub exclude_tools: Vec<String>,
     pub allow_mutations: bool,
     pub allow_launch: bool,
-    /// Accepted; no AT-SPI source exists in this milestone.
+    /// Enables the AT-SPI source (`a11y` toolset joins, AT-SPI events).
     pub allow_atspi: bool,
 }
 
@@ -85,6 +85,8 @@ pub struct Config {
     pub handshake_timeout: Duration,
     /// Capacity of each session's event and log ring.
     pub ring_capacity: usize,
+    /// Where the AT-SPI client finds the buses (default: the environment).
+    pub atspi_bus: crate::a11y::atspi::BusConfig,
 }
 
 impl Config {
@@ -113,6 +115,7 @@ impl Default for Config {
             default_deadline_ms: 10_000,
             handshake_timeout: Duration::from_secs(3),
             ring_capacity: 1024,
+            atspi_bus: Default::default(),
         }
     }
 }

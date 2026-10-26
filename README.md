@@ -96,7 +96,7 @@ has none). Working apps: `crates/gtk-mcp-agent-capi/smoke/` (`smoke.c`,
 | `--toolsets core,actions,layout-style,a11y,diagnostics,app` | Tool exposure; default `core`. `--tools` / `--exclude-tools` refine; unknown names fail startup |
 | `--allow-mutations` | Mutating tools; the app must also run with `GTK_MCP_MUTATIONS=1` |
 | `--allow-launch` | `launch_app`, `restart_app`, `stop_app` (otherwise `launch_disabled`) |
-| `--allow-atspi` | AT-SPI source |
+| `--allow-atspi` | AT-SPI source: joins accessible names, states, relations onto `accessible_tree`/`inspect_accessible`, enables the AT-SPI audit rules and event source (needs the app on the same a11y bus, `GTK_A11Y=atspi`) |
 | `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | Bounded retention |
 
 ## Environment variables

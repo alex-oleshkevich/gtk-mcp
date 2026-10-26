@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::rc::Rc;
 
+pub mod a11y;
 pub mod actions;
 pub mod app;
 pub mod batch;
@@ -75,6 +76,9 @@ pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -
         "list_resources" => app::list_resources(parse(tool, params)?),
         "read_resource" => app::read_resource(parse(tool, params)?),
         "object_stats" => app::object_stats(agent, parse(tool, params)?),
+        "accessible_tree" => a11y::accessible_tree(agent, parse(tool, params)?),
+        "inspect_accessible" => a11y::inspect_accessible(agent, parse(tool, params)?),
+        "trace_focus_order" => a11y::trace_focus_order(agent, parse(tool, params)?, ctx).await,
         other => Err(AgentError::new(
             gtk_mcp_protocol::ErrorCode::NotFound,
             format!("method '{other}' is not implemented by this agent"),

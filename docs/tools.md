@@ -109,6 +109,16 @@ refs; without it, AT-SPI fields are reported unavailable.
 | `audit_accessibility` | R | Rule findings with ref and evidence; AT-SPI-dependent rules reported as skipped when the source is off |
 | `trace_focus_order` | M | Walk the Tab chain with `gtk_widget_child_focus`, report order, loops, unreachable widgets; restores focus. Side effects possible: scroll-to-focus, popover autohide, select-on-focus |
 
+Fields carry their source: GTK-sourced values come from the public `GtkAccessible`
+API (role, parent/children, bounds, platform state); AT-SPI-sourced values
+(name, description, states, relations, actions, text, value, attributes) come
+from the a11y bus. `accessible_tree` nodes are `source: "gtk+atspi"` when
+joined, `"gtk"` when GTK does not export them (role `none`/`presentation`,
+list-view internals) and `"atspi"` with `ref: null` for AT-SPI-only nodes.
+Without `--allow-atspi` (or when the app is not on the a11y bus) AT-SPI fields
+read `{"available": false, "reason"}` and AT-SPI audit rules `status: "skipped"`.
+Secret widgets never expose name, text or value.
+
 ## diagnostics
 
 | Tool | | Purpose |
