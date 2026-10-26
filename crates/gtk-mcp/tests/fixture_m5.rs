@@ -405,6 +405,38 @@ async fn record_real_input_becomes_a_batch_that_replays_in_a_new_session() {
     assert_eq!(text_of(&c2, "click-counter").await, "clicks: 1");
 }
 
+/// gm-oa8: a key controller listed while its entry was not secret becomes
+/// secret with the entry (input-purpose switched to password): a signal watch
+/// on it reports names only, also for real key presses.
+#[tokio::test(flavor = "multi_thread")]
+async fn controller_of_an_entry_that_became_secret_is_secret() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let policy = Policy { toolsets: vec!["core".into(), "actions".into(), "diagnostics".into()], allow_mutations: true, ..Policy::default() };
+    let c = Client { broker: Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap() };
+    let q = c.json("query", json!({"selector": {"type_name": "GtkText", "ancestor": by_id("name-entry")}})).await;
+    let text = q["matches"][0]["ref"].as_str().unwrap_or_else(|| panic!("{q}")).to_owned();
+    let r = c.json("inspect_controllers", json!({"target": text})).await;
+    let key = r["controllers"].as_array().unwrap().iter().find(|x| x["type"] == "GtkEventControllerKey").unwrap_or_else(|| panic!("{r}"));
+    assert!(key.get("secret").is_none() || key["secret"] == false, "not secret yet: {key}");
+    let key = key["ref"].as_str().unwrap().to_owned();
+
+    c.json("set_property", json!({"target": by_id("name-entry"), "name": "input-purpose", "value": "password"})).await;
+    let w = c.json("watch", json!({"target": key, "kind": "signal", "signal": "key-pressed"})).await;
+    assert_eq!(w["secret"], true, "{w}");
+
+    let Some(bin) = wayland_mcp_binary() else {
+        eprintln!("controller_of_an_entry_that_became_secret_is_secret: real key part SKIPPED, wayland-mcp binary not found");
+        return;
+    };
+    focus(&c, "name-entry").await;
+    let mut input = RealInput::start(&bin, &display);
+    input.call("key", json!({"keys": ["Left"]}));
+    let ev = wait_event(&c, "key-pressed on the secret entry", |e| e["signal"] == "key-pressed").await;
+    assert_eq!(ev["secret"], true, "{ev}");
+    assert!(ev.get("args").is_none(), "no keyval of a secret field: {ev}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn record_real_pointer_click_and_secret_typing() {
     let display = require_display!();

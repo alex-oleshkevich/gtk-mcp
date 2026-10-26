@@ -104,11 +104,21 @@ fn has_secret_buffer(obj: &glib::Object) -> bool {
 }
 
 /// Is `obj` in the secret set: a root, a descendant of a root, a root's
-/// editable delegate, a root's buffer, or a widget holding a secret buffer.
+/// editable delegate, a root's buffer, a widget holding a secret buffer, or an
+/// event controller of a secret widget.
 pub fn is_secret(obj: &impl IsA<glib::Object>) -> bool {
     let obj = obj.upcast_ref::<glib::Object>();
     if flag(obj) == Some(FLAG_SECRET) {
         return true;
+    }
+    // Judged now, not when the controller was first listed: its widget may
+    // have become secret since (mark_secret, input-purpose), and its signals
+    // carry what is typed there.
+    if let Some(c) = obj.dynamic_cast_ref::<gtk::EventController>() {
+        if c.widget().is_some_and(|w| is_secret(&w)) {
+            set_flag(obj, FLAG_SECRET);
+            return true;
+        }
     }
     if has_secret_buffer(obj) {
         set_flag(obj, FLAG_SECRET);
