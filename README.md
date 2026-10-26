@@ -1,159 +1,83 @@
 # gtk-mcp
 
-An MCP server that lets a coding agent inspect, exercise, render and diagnose a
-running GTK4 / libadwaita application **from inside the application process**.
-A broker (`gtk-mcp`, MCP over stdio) talks over a Unix socket to an agent
-(`gtk-mcp-agent`) that the app embeds. Real input, desktop screenshots and
-compositor state belong to `wayland-mcp`; gtk-mcp never injects input.
+gtk-mcp lets a coding agent work with a running GTK4 or libadwaita app from inside the app's own process. The agent can read the widget tree, look at layout and styles, press buttons and fill in entries by calling GTK directly, take pictures of individual widgets, and watch what changes. It never simulates keyboard or mouse input, and it never takes screenshots of your desktop. That kind of testing belongs to wayland-mcp.
 
-Authoritative design: [`docs/plan.md`](docs/plan.md). Tool contracts:
-[`docs/tools.md`](docs/tools.md). Embedding details:
-[`docs/embedding.md`](docs/embedding.md).
+Two programs do the work. The broker is the MCP server your client talks to over stdio. The agent is a small library you add to your app during development. They talk over a Unix socket in your runtime directory.
+
+## What it can do
+
+There are 56 tools, grouped into toolsets you turn on when you start the broker.
+
+With the core toolset, the agent lists the apps and windows it can see, prints the widget tree as text or JSON, finds widgets by type, label, CSS class or the name you gave them, and reads any GObject property. It can activate buttons, open expanders, switch tabs, fill in entries, edit text buffers and wait for the interface to reach a state you describe. Calls that change something report the state they actually found afterwards, so a clamped slider or an entry that rejected your text does not get reported as success.
+
+The actions toolset covers GActions, menu models and shortcuts. The layout-style toolset measures widgets, flags labels that got ellipsized and children that overflow their parent, and applies temporary CSS so you can try a style and see the parse errors without rebuilding. The diagnostics toolset watches property changes, reads the app's logs, measures frame times and records a session of you using the app as a script the agent can replay. The a11y toolset reads the accessible tree and checks it against a set of rules. The app toolset opens files through GApplication, reads and writes GSettings, and exposes state your app registers itself.
+
+Pictures come from GTK rendering the widget, not from the screen. A capture works on a covered window and on layer-shell surfaces like panels, where a desktop screenshot would need the compositor's help.
 
 ## Install
 
+You need Rust and GTK 4.10 or newer on the machine. Build the broker with:
+
 ```sh
-cargo build --release -p gtk-mcp          # target/release/gtk-mcp
+cargo build --release -p gtk-mcp
 ```
 
-Register it with an MCP client as a stdio server, for example:
+The binary lands in `target/release/gtk-mcp`. Point your MCP client at it as a stdio server:
 
 ```json
-{ "command": "/path/to/gtk-mcp", "args": ["--toolsets", "core,app", "--allow-mutations"] }
+{
+  "mcpServers": {
+    "gtk-mcp": {
+      "command": "/path/to/gtk-mcp",
+      "args": ["--toolsets", "core,app", "--allow-mutations"]
+    }
+  }
+}
 ```
 
-Requirements: GTK 4.10+ in the app (libadwaita and gtk4-layer-shell are never
-linked by the agent; they are reached by GType name and `dlsym`).
+## Add it to your app
 
-## Embed the agent in your app
-
-Add `gtk-mcp-agent` behind a Cargo feature that release builds do not enable,
-and call `attach` once, on the main thread, after the application object exists:
+Add the agent as an optional dependency, behind a Cargo feature you leave off in release builds:
 
 ```toml
 [features]
 gtk-mcp = ["dep:gtk-mcp-agent"]
+
 [dependencies]
 gtk-mcp-agent = { version = "0.1", optional = true }
 ```
 
+Then call `attach` once, on the main thread, after your application object exists. With Relm4 that is right after `RelmApp::new`:
+
 ```rust
 #[cfg(feature = "gtk-mcp")]
-gtk_mcp_agent::attach(&app);
+gtk_mcp_agent::attach(&relm4::main_application());
 ```
 
-The agent is inert unless `GTK_MCP=1` is set at runtime. It binds
-`<dir>/<pid>.sock` (directory `0700`, socket `0600`, peers checked with
-`SO_PEERCRED`) when the application starts up, and removes `GTK_MCP*` from the
-process environment after reading them so apps your app launches are not
-instrumented. Optional API (all no-ops when the agent is inactive):
+Nothing happens unless `GTK_MCP=1` is in the environment when the app starts, so a debug build is safe to leave on your machine. Mutations need one more variable, `GTK_MCP_MUTATIONS=1`, and the broker's `--allow-mutations` flag. Both sides have to agree.
 
-| Function | Purpose |
-|---|---|
-| `register_state(name, Fn() -> serde_json::Value)` | Expose app state as the MCP resource `gtk-mcp://<session>/app-state/<name>` (needs the `app` toolset). The closure runs on the main thread; re-registering a name replaces it. A leading `app-state/` in `name` is accepted |
-| `register_settings(&gio::Settings)` | Tell `inspect_gsettings` / `set_gsetting` which `GSettings` object the app uses |
-| `mark_secret(&widget)` | Add a widget to the secret set |
+Give widgets stable names where you can. `entry.set_widget_name("server-address")` makes the widget findable as `server-address` no matter what its label says or which language the UI is in.
 
-Stable selectors need no dependency: `widget.set_widget_name("panel-clock")`
-is the `automation_id`.
+Three optional calls cover the rest. `register_state("panels", ...)` hands the broker a closure that returns your app state as JSON, which shows up as a read-only MCP resource. `register_settings(&settings)` tells the GSettings tools which settings object your app uses. `mark_secret(&widget)` keeps a widget's text out of every response. Password entries are detected on their own.
 
-## Other languages (C, Python, GJS)
+C, Python and GJS apps use the C library in `crates/gtk-mcp-agent-capi` instead. It ships a header and a GObject Introspection typelib, and the call is the same idea: `GtkMcp.attach(app)` before you run the application.
 
-`crates/gtk-mcp-agent-capi` builds `libgtk_mcp_agent_capi.so` (`cargo build -p
-gtk-mcp-agent-capi`), with a header (`include/gtk-mcp-agent.h`) and a
-GObject-introspection description (`GtkMcp-1.gir`, compiled with
-`g-ir-compiler --shared-library=libgtk_mcp_agent_capi.so` to `GtkMcp-1.typelib`).
-The library links the host's `libgtk-4` dynamically (no second GTK) and never
-links libadwaita or gtk4-layer-shell. Same `GTK_MCP=1` gating and socket
-contract as the Rust crate; call everything on the main thread.
+## Use it
 
-```c
-#include <gtk-mcp-agent.h>
-gtk_mcp_agent_attach (app);              /* before g_application_run() */
+Start your app with the agent on:
+
+```sh
+GTK_MCP=1 GTK_MCP_MUTATIONS=1 ./your-app
 ```
 
-```python
-gi.require_version('GtkMcp', '1'); from gi.repository import GtkMcp
-GtkMcp.attach(app)                       # GI_TYPELIB_PATH / LD_LIBRARY_PATH -> build dir
-```
+Then ask the coding agent to look. A typical round goes like this: `list_apps` finds your process, `snapshot` prints the window, `query` picks out one widget, `interact` opens the expander and fills the entry, `wait_for` waits until the Save button becomes sensitive, and `capture` renders the expander so the agent can see the result. After a rebuild, `restart_app` (with `--allow-launch`) starts the new binary and the same session continues against it.
 
-```js
-import GtkMcp from 'gi://GtkMcp';
-GtkMcp.attach(app);
-```
+Two flags are worth knowing early. `--toolsets` chooses which tools the client sees, and defaults to `core`; add `app` if you registered state, `a11y` if you want accessibility checks (that also needs `--allow-atspi` and the app started with `GTK_A11Y=atspi`). `--allow-launch` lets the broker start and stop apps itself, with presets for things like in-process file choosers and translation testing.
 
-Also exported: `mark_secret(GObject)`, `register_action_group(widget, prefix,
-group)`, `register_settings(GSettings)` and `register_state(name, callback)`
-(the callback returns a JSON string; C signature `char *(*)(gpointer)` plus
-`user_data`/`GDestroyNotify`). There is no log-forwarding API (the Rust agent
-has none). Working apps: `crates/gtk-mcp-agent-capi/smoke/` (`smoke.c`,
-`smoke.py`, `smoke.js`), exercised by `tests/fixture_m7.rs`.
+## Security
 
-## Policy flags (broker)
+The agent stays off without `GTK_MCP=1`. The socket is readable only by your user, and the broker checks the peer's uid before it talks. Password fields and anything you mark secret never appear in responses, not even their length, and captures refuse a password field while it is showing its text. Captures can still show other sensitive pixels, so do not enable the agent on a session with real credentials on screen.
 
-| Flag | Meaning |
-|---|---|
-| `--toolsets core,actions,layout-style,a11y,diagnostics,app` | Tool exposure; default `core`. `--tools` / `--exclude-tools` refine; unknown names fail startup |
-| `--allow-mutations` | Mutating tools; the app must also run with `GTK_MCP_MUTATIONS=1` |
-| `--allow-launch` | `launch_app`, `restart_app`, `stop_app` (otherwise `launch_disabled`) |
-| `--allow-atspi` | AT-SPI source: joins accessible names, states, relations onto `accessible_tree`/`inspect_accessible`, enables the AT-SPI audit rules and event source (needs the app on the same a11y bus, `GTK_A11Y=atspi`) |
-| `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | Bounded retention |
+## More
 
-## Environment variables
-
-| Name | Where | Meaning |
-|---|---|---|
-| `GTK_MCP=1` | app | activate the agent |
-| `GTK_MCP_MUTATIONS=1` | app | the agent accepts mutations (broker policy also required) |
-| `GTK_MCP_DIR` | app and broker | socket directory; default `$XDG_RUNTIME_DIR/gtk-mcp` |
-
-`launch_app` sets `GTK_MCP=1` and `GTK_MCP_DIR` for the child, and
-`GTK_MCP_MUTATIONS=1` only when the broker runs with `--allow-mutations`.
-Caller-supplied `GTK_MCP*` variables are rejected (`invalid_params`).
-
-## Lifecycle (`launch_app`, `restart_app`, `stop_app`)
-
-- `launch_app {argv, cwd?, env?, presets?, wayland_display?, xdg_runtime_dir?, timeout_ms?}`
-  runs `argv` directly (no shell) in its own process group, with stdin closed
-  and stdout/stderr captured into a cursor log, then waits (default 15 s) for
-  the app's socket and returns the session (`launched_by_broker: true`).
-  Presets: `no_portals` (`GDK_DEBUG=no-portals`), `instance_count`
-  (`GOBJECT_DEBUG=instance-count`), `a11y` (`GTK_A11Y`), `language`
-  (`LANGUAGE`), `gsk_renderer` (`GSK_RENDERER`), `gtk_debug` (`GTK_DEBUG`).
-  They are inherited by the app's own children. The display is the broker's,
-  or the optional `wayland_display` / `xdg_runtime_dir`; there is no coupling
-  to `wayland-mcp`.
-- `stop_app {session, timeout_ms?}`: SIGTERM to the process group, SIGKILL after
-  `timeout_ms` (default 3000).
-- `restart_app {session, timeout_ms?, launch_timeout_ms?}`: stop, then launch the
-  same spec again; returns the new session. The old session stays listed as exited.
-- `restart_app` / `stop_app` refuse sessions the broker did not launch
-  (`unsupported_operation`).
-- When an app exits, its session becomes `exited` with `code`/`signal`, the
-  in-flight request id, and retained logs/events (`list_apps` shows a
-  `post_mortem` object). Library users read the logs with `Session::logs_since`.
-  At most `--retain-exited` exited sessions are kept.
-- Apps launched by the broker are terminated when the broker exits.
-
-## Tools by toolset in this build
-
-- `core`: `list_apps`, `list_windows`, `snapshot`, `diff_snapshots`, `query`,
-  `inspect`, `list_properties`, `get_property`, `set_property`, `list_signals`,
-  `interact`, `inspect_text`, `edit_text`, `wait_for`, `batch`, `inspect_model`,
-  `capture`, `diff_captures`, `launch_app`, `restart_app`, `stop_app`.
-- `app`: `app_open`, `inspect_gsettings`, `set_gsetting`, `list_resources`,
-  `read_resource`, plus the `app-state/<name>` MCP resources.
-- `diagnostics`: `object_stats` (needs `GOBJECT_DEBUG=instance-count` at app
-  start, e.g. the `instance_count` preset, and a GLib built with debug support;
-  otherwise `unavailable`).
-
-## Security model
-
-- The agent is off unless `GTK_MCP=1`; mutations need both the broker flag and
-  the app's `GTK_MCP_MUTATIONS=1`; launching needs `--allow-launch`.
-- Secret widgets (password entries, anything `mark_secret`) never leak text or
-  length; GSettings keys whose names look like credentials are reported as
-  `{"redacted": true}`. Captures can still contain unmarked sensitive pixels:
-  do not enable the agent on sessions with real credentials on screen.
-- Every request runs on the GTK main thread; a stuck main loop yields
-  `target_unresponsive`, never a hang. Sockets are user-only and peer-checked.
+`docs/tools.md` lists every tool. `docs/embedding.md` covers the embedding API in detail, and `docs/widget-tree.md` describes the snapshot format. `docs/plan.md` is the design document the implementation was built from.
