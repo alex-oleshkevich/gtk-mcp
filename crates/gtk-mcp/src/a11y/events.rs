@@ -22,7 +22,7 @@ const INTERFACES: &[&str] = &["Object", "Window", "Focus"];
 /// Minimum interval between join refreshes triggered by unknown objects.
 const REFRESH_GAP: Duration = Duration::from_millis(300);
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Known {
     r#ref: Option<String>,
     role: String,
@@ -66,26 +66,28 @@ fn collect(n: &Value, out: &mut HashMap<String, Known>) {
 /// The `read_events` record of one AT-SPI event. Secret objects carry the
 /// event kind and state only: no name, and no detail numbers for events whose
 /// details are text offsets or lengths (`object:text-changed:insert` carries the
-/// position and length of the inserted text).
-fn event_record(event: &str, d1: i32, d2: i32, path: &str, k: &Known) -> Value {
+/// position and length of the inserted text). An object missing from the join
+/// (`k` is `None`) may be secret: it is recorded as `unresolved`, the same way.
+fn event_record(event: &str, d1: i32, d2: i32, path: &str, k: Option<&Known>) -> Value {
     let mut rec = json!({
         "kind": "atspi",
         "source": "atspi",
         "subscription": "atspi",
         "event": event,
         "path": path,
-        "ref": k.r#ref,
-        "role": k.role,
+        "ref": k.and_then(|k| k.r#ref.clone()),
+        "role": k.map(|k| k.role.clone()),
     });
+    let withheld = k.is_none_or(|k| k.secret);
     let state_only = ["object:state-changed", "focus:", "window:"].iter().any(|p| event.starts_with(p));
-    if !k.secret || state_only {
+    if !withheld || state_only {
         rec["detail1"] = json!(d1);
         rec["detail2"] = json!(d2);
     }
-    if k.secret {
-        rec["secret"] = json!(true);
-    } else {
-        rec["name"] = json!(k.name);
+    match k {
+        None => rec["unresolved"] = json!(true),
+        Some(k) if k.secret => rec["secret"] = json!(true),
+        Some(k) => rec["name"] = json!(k.name),
     }
     rec
 }
@@ -174,8 +176,7 @@ impl Broker {
                         }
                     }
                 }
-                let k = known.get(&path).cloned().unwrap_or_default();
-                sess.push_event(event_record(&event, d1, d2, &path, &k));
+                sess.push_event(event_record(&event, d1, d2, &path, known.get(&path)));
             }
         });
         if let Some(old) = lock(&self.atspi_watches).insert(session.id().to_owned(), handle) {
@@ -212,21 +213,37 @@ mod tests {
     #[test]
     fn secret_records_carry_no_name_and_no_text_offsets() {
         let secret = Known { r#ref: Some("w9".into()), role: "password text".into(), name: None, secret: true };
-        let r = event_record("object:text-changed:insert", 3, 1, "/p", &secret);
+        let r = event_record("object:text-changed:insert", 3, 1, "/p", Some(&secret));
         assert_eq!(r["secret"], true);
         for k in ["name", "detail1", "detail2"] {
             assert!(r.get(k).is_none(), "{k}: {r}");
         }
-        let r = event_record("object:text-caret-moved", 4, 0, "/p", &secret);
+        let r = event_record("object:text-caret-moved", 4, 0, "/p", Some(&secret));
         assert!(r.get("detail1").is_none(), "{r}");
         // State changes keep their state value.
-        let r = event_record("object:state-changed:focused", 1, 0, "/p", &secret);
+        let r = event_record("object:state-changed:focused", 1, 0, "/p", Some(&secret));
         assert_eq!((&r["detail1"], &r["detail2"]), (&json!(1), &json!(0)));
 
         let plain = Known { r#ref: Some("w1".into()), role: "text".into(), name: Some("Name".into()), secret: false };
-        let r = event_record("object:text-changed:insert", 3, 1, "/q", &plain);
+        let r = event_record("object:text-changed:insert", 3, 1, "/q", Some(&plain));
         assert_eq!((&r["detail1"], &r["detail2"], &r["name"]), (&json!(3), &json!(1), &json!("Name")));
         assert!(r.get("secret").is_none());
+    }
+
+    /// gm-36d: an object the join does not know (refresh rate-limited or
+    /// failed, outside the joined tree) may be a password field: it gets no
+    /// name and no text offsets, only state details.
+    #[test]
+    fn unresolved_objects_fail_closed() {
+        let r = event_record("object:text-changed:insert", 7, 1, "/u", None);
+        assert_eq!(r["unresolved"], true);
+        assert!(r["ref"].is_null() && r["role"].is_null(), "{r}");
+        for k in ["name", "detail1", "detail2", "secret"] {
+            assert!(r.get(k).is_none(), "{k}: {r}");
+        }
+        assert!(event_record("object:text-caret-moved", 8, 0, "/u", None).get("detail1").is_none());
+        let r = event_record("object:state-changed:focused", 1, 0, "/u", None);
+        assert_eq!((&r["detail1"], &r["detail2"]), (&json!(1), &json!(0)));
     }
 
     #[test]

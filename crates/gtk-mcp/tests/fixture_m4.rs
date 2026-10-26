@@ -32,6 +32,9 @@ const SCHEMA_XML: &str = r#"<schemalist>
   <schema id="dev.gtkmcp.Elsewhere" path="/dev/gtkmcp/elsewhere/">
     <key name="knob" type="i"><default>1</default></key>
   </schema>
+  <schema id="dev.gtkmcp.Fixture.Profile">
+    <key name="knob" type="i"><default>1</default></key>
+  </schema>
 </schemalist>"#;
 const RES_XML: &str = r#"<gresources><gresource prefix="/dev/gtkmcp/fixture">
   <file compressed="true">hello.txt</file><file>data/blob.bin</file></gresource></gresources>"#;
@@ -576,6 +579,18 @@ async fn gsettings_inspect_set_and_read_back() {
     assert_eq!(e.code, ErrorCode::UnsupportedOperation, "{e:?}");
     let r = c.json("inspect_gsettings", json!({"schema": "dev.gtkmcp.Elsewhere"})).await;
     assert_eq!(find_key(&r["schemas"][0], "knob")["value"], 1, "nothing was written");
+
+    // gm-m7c: the app's relocatable schema is written under the app's own path
+    // only, never at another schema's location in the shared backend.
+    const PROFILE: &str = "dev.gtkmcp.Fixture.Profile";
+    let e = c.err("set_gsetting", json!({"schema": PROFILE, "path": "/dev/gtkmcp/elsewhere/", "key": "knob", "value": 2})).await;
+    assert_eq!(e.code, ErrorCode::UnsupportedOperation, "{e:?}");
+    let r = c.json("inspect_gsettings", json!({"schema": "dev.gtkmcp.Elsewhere"})).await;
+    assert_eq!(find_key(&r["schemas"][0], "knob")["value"], 1, "nothing was written through the relocatable schema");
+    let r = c.json("set_gsetting", json!({"schema": PROFILE, "path": "/dev/gtkmcp/fixture/profiles/a/", "key": "knob", "value": 3})).await;
+    assert_eq!(r["value"], 3, "{r}");
+    let e = c.err("set_gsetting", json!({"schema": PROFILE, "key": "knob", "value": 3})).await;
+    assert_eq!(e.code, ErrorCode::InvalidParams, "a relocatable schema needs a path");
 
     // read-only tool works without mutations; the write is gated
     let (ro, _b2) = app_broker(&fx, false);

@@ -201,6 +201,14 @@ fn settings_path(s: &gio::Settings) -> Option<String> {
     s.path().map(|p| p.to_string())
 }
 
+/// Is the GSettings `path` under the application's own path, `/` + the app id
+/// with `.` as `/`? Compared ASCII case-insensitively: apps conventionally
+/// lowercase it (`org.gnome.Terminal` keeps its settings in `/org/gnome/terminal/`).
+fn under_app_path(path: &str, app_id: &str) -> bool {
+    let prefix = format!("/{}/", app_id.replace('.', "/"));
+    path.len() >= prefix.len() && path.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
+
 fn key_json(settings: Option<&gio::Settings>, schema: &gio::SettingsSchema, name: &str) -> Value {
     let key = schema.key(name);
     let ty = key.value_type();
@@ -331,6 +339,23 @@ pub fn set_gsetting(agent: &Rc<Agent>, p: SetGsettingParams) -> Result<Value, Ag
                 app_id.as_deref().unwrap_or("none")
             ),
         ));
+    }
+    // A relocatable schema writes wherever `path` says: only at the path of a
+    // registered object of that schema, or under the app's own path.
+    if let (None, Some(path)) = (schema.path(), p.path.as_deref()) {
+        let at_registered = agent.app_state.live_settings().iter().any(|s| {
+            s.property::<Option<String>>("schema-id").as_deref() == Some(p.schema.as_str()) && settings_path(s).as_deref() == Some(path)
+        });
+        if !at_registered && !app_id.as_deref().is_some_and(|id| under_app_path(path, id)) {
+            return Err(err(
+                ErrorCode::UnsupportedOperation,
+                format!(
+                    "path '{path}' does not belong to this app: a relocatable schema is written at the path of a \
+                     registered settings object or under /{}/",
+                    app_id.as_deref().unwrap_or("<application id>").replace('.', "/")
+                ),
+            ));
+        }
     }
     let settings = settings_for(agent, &schema, p.path.as_deref())?.ok_or_else(|| {
         AgentError::invalid_params(format!("'{}' is a relocatable schema: pass `path`", p.schema))
@@ -530,4 +555,19 @@ pub fn object_stats(agent: &Rc<Agent>, p: ObjectStatsParams) -> Result<Value, Ag
         "total_instances": total,
         "truncated": matched > limit,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_paths() {
+        assert!(under_app_path("/dev/gtkmcp/Fixture/profiles/a/", "dev.gtkmcp.Fixture"));
+        assert!(under_app_path("/org/gnome/terminal/legacy/", "org.gnome.Terminal"));
+        assert!(!under_app_path("/org/gnome/desktop/interface/", "org.gnome.Terminal"));
+        assert!(!under_app_path("/dev/gtkmcp/FixtureX/", "dev.gtkmcp.Fixture"));
+        assert!(!under_app_path("/dev/gtkmcp/", "dev.gtkmcp.Fixture"));
+        assert!(!under_app_path("/dév/gtkmcp/Fixture/", "dev.gtkmcp.Fixture"));
+    }
 }

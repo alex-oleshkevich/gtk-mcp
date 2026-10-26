@@ -155,8 +155,10 @@ As built (M5/M6):
   `ref` is the joined widget ref or null. Secret widgets (and every AT-SPI node
   below them) omit `name` and carry `secret: true`; their `detail1`/`detail2`
   are kept only for state, focus and window events, since text events carry
-  offsets and lengths. The subscription and kind filters work for these
-  broker-sourced records as for agent events.
+  offsets and lengths. Nodes the join does not know (yet) may be secret: they
+  carry `unresolved: true`, null `ref`/`role`, and are withheld the same way.
+  The subscription and kind filters work for these broker-sourced records as
+  for agent events.
 - Events are `$/event` notifications kept in the session's bounded ring:
   `{kind: notify|signal|items_changed|selection_changed, subscription, target,
   type, property|signal|position…, value|args, time_ms, by_agent}`. Events of
@@ -203,7 +205,7 @@ As built (M5/M6):
 |---|---|---|
 | `app_open` | M | `g_application_open` with files, or `activate` |
 | `inspect_gsettings` | R | The app's GSettings schemas, keys, values |
-| `set_gsetting` | M | Write a key of the app's own schemas (registered with `register_settings` or under its application id); other schemas are read-only |
+| `set_gsetting` | M | Write a key of the app's own schemas (registered with `register_settings` or under its application id); other schemas are read-only. A relocatable schema is written only at a registered object's path or under the app's path (`/` + app id with `.` as `/`, any case) |
 | `list_resources` | R | Registered GResource paths |
 | `read_resource` | R | Read one resource, size-limited |
 
