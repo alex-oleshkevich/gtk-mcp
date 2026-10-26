@@ -263,6 +263,9 @@ pub struct BatchResult {
     /// Index of the first failing step when the batch stopped early.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopped_at: Option<usize>,
+    /// The broker cancelled the request mid-batch; `steps` holds what ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
 }
 
 // -- tool registry -----------------------------------------------------------

@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod json;
 pub mod layer;
 pub mod registry;
 pub mod secrecy;

@@ -196,6 +196,35 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     root.append(&hooks);
     root.append(&victim_box);
 
+    // Props/model tools (get_property GdkRGBA, inspect_model chain, column view).
+    root.append(&named(gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new())), "color-button"));
+    let words = gtk::StringList::new(&["pear", "apple", "banana", "cherry", "apricot", "fig", "grape", "avocado"]);
+    let expr = gtk::PropertyExpression::new(gtk::StringObject::static_type(), gtk::Expression::NONE, "string");
+    let sorted = gtk::SortListModel::new(Some(words), Some(gtk::StringSorter::new(Some(&expr))));
+    let filter = gtk::StringFilter::new(Some(&expr));
+    filter.set_match_mode(gtk::StringFilterMatchMode::Substring);
+    filter.set_search(Some("a"));
+    let filtered = gtk::FilterListModel::new(Some(sorted), Some(filter));
+    let multi = gtk::MultiSelection::new(Some(filtered));
+    multi.select_item(1, true);
+    let words_factory = gtk::SignalListItemFactory::new();
+    words_factory.connect_setup(|_, item| {
+        item.downcast_ref::<gtk::ListItem>().unwrap().set_child(Some(&gtk::Label::new(None)));
+    });
+    words_factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let s = item.item().and_downcast::<gtk::StringObject>().unwrap();
+        item.child().and_downcast::<gtk::Label>().unwrap().set_label(&s.string());
+    });
+    let words_list = named(gtk::ListView::new(Some(multi), Some(words_factory.clone())), "filtered-list");
+    root.append(&words_list);
+    let columns = named(
+        gtk::ColumnView::new(Some(gtk::SingleSelection::new(Some(gtk::StringList::new(&["one", "two", "three"]))))),
+        "columns",
+    );
+    columns.append_column(&gtk::ColumnViewColumn::new(Some("Name"), Some(words_factory)));
+    root.append(&columns);
+
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&root));
     scroll.set_vexpand(true);

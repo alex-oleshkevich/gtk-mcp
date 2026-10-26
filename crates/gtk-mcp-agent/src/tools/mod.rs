@@ -6,9 +6,14 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::rc::Rc;
 
+pub mod batch;
 pub mod inspect;
+pub mod model;
+pub mod props;
 pub mod query;
+pub mod signals;
 pub mod snapshot;
+pub mod wait;
 pub mod windows;
 
 pub fn parse<T: DeserializeOwned>(tool: &str, params: Value) -> Result<T, AgentError> {
@@ -16,8 +21,14 @@ pub fn parse<T: DeserializeOwned>(tool: &str, params: Value) -> Result<T, AgentE
 }
 
 pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -> Result<Value, AgentError> {
-    let _ = ctx;
     match tool {
+        "batch" => batch::batch(agent, parse(tool, params)?, ctx).await,
+        "list_properties" => props::list_properties(agent, parse(tool, params)?),
+        "get_property" => props::get_property(agent, parse(tool, params)?),
+        "set_property" => props::set_property(agent, parse(tool, params)?, ctx).await,
+        "list_signals" => signals::list_signals(agent, parse(tool, params)?),
+        "inspect_model" => model::inspect_model(agent, parse(tool, params)?),
+        "wait_for" => wait::wait_for(agent, parse(tool, params)?, ctx).await,
         "list_windows" => windows::list_windows(agent),
         "snapshot" => snapshot::snapshot(agent, parse(tool, params)?),
         "query" => query::query(agent, parse(tool, params)?),

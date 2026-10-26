@@ -190,7 +190,8 @@ impl Fixture {
             .env("GDK_BACKEND", "wayland")
             .env("GSETTINGS_BACKEND", "memory")
             .env("GTK_A11Y", "none")
-            .stdout(Stdio::null());
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(std::fs::File::create(dir.path().join("fixture.stderr")).unwrap()));
         if mutations {
             cmd.env("GTK_MCP_MUTATIONS", "1");
         }
@@ -200,14 +201,22 @@ impl Fixture {
         die_with_parent(&mut cmd);
         let child = cmd.spawn().expect("spawn fixture");
         let pid = child.id();
-        let f = Fixture { child, dir, pid };
+        let mut f = Fixture { child, dir, pid };
         let sock = f.dir.path().join(format!("{pid}.sock"));
         let t = Instant::now();
         while !sock.exists() {
-            assert!(t.elapsed() < Duration::from_secs(30), "fixture socket did not appear in 30 s");
+            assert!(t.elapsed() < Duration::from_secs(30), "fixture socket did not appear in 30 s; stderr:\n{}", f.stderr());
+            if let Ok(Some(st)) = { let mut c = &mut f.child; c.try_wait() } {
+                panic!("fixture exited early ({st}); stderr:\n{}", f.stderr());
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
         f
+    }
+
+    /// Fixture stderr so far (GTK warnings, agent log lines) for failure output.
+    pub fn stderr(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("fixture.stderr")).unwrap_or_default()
     }
 
     pub fn socket(&self) -> PathBuf {
@@ -224,9 +233,15 @@ pub struct Client {
     pub broker: Arc<Broker>,
 }
 
+/// Hard cap for any single client call, on top of the broker's own deadlines.
+const CALL_WATCHDOG: Duration = Duration::from_secs(45);
+
 impl Client {
     pub async fn call(&self, tool: &str, args: Value) -> Result<ToolOutcome, AgentError> {
-        self.broker.call_tool(tool, args).await
+        match tokio::time::timeout(CALL_WATCHDOG, self.broker.call_tool(tool, args.clone())).await {
+            Ok(r) => r,
+            Err(_) => panic!("WATCHDOG: {tool} {args} did not return within {CALL_WATCHDOG:?}"),
+        }
     }
 
     /// Call and parse the first text content as JSON.
