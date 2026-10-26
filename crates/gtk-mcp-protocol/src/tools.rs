@@ -6,6 +6,7 @@
 //! before parsing, so step arguments never repeat it.
 
 use crate::types::*;
+use crate::tools_m3::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -301,6 +302,16 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "inspect_model", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "capture", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "diff_captures", toolset: "core", mutating: false, agent: false },
+    // layout-style (M3)
+    ToolSpec { name: "inspect_layout", toolset: "layout-style", mutating: false, agent: true },
+    ToolSpec { name: "audit_layout", toolset: "layout-style", mutating: false, agent: true },
+    ToolSpec { name: "inspect_style", toolset: "layout-style", mutating: false, agent: true },
+    ToolSpec { name: "apply_css", toolset: "layout-style", mutating: true, agent: true },
+    ToolSpec { name: "remove_css", toolset: "layout-style", mutating: true, agent: true },
+    ToolSpec { name: "highlight", toolset: "layout-style", mutating: true, agent: true },
+    ToolSpec { name: "inspect_render", toolset: "layout-style", mutating: false, agent: true },
+    ToolSpec { name: "inspect_settings", toolset: "layout-style", mutating: false, agent: true },
+    ToolSpec { name: "override_setting", toolset: "layout-style", mutating: true, agent: true },
 ];
 
 pub fn tool_spec(name: &str) -> Option<&'static ToolSpec> {
@@ -356,6 +367,15 @@ pub fn parse_params(tool: &str, args: Value) -> Result<(), String> {
         "inspect_model" => chk!(InspectModelParams),
         "capture" => chk!(CaptureParams),
         "diff_captures" => chk!(DiffCapturesParams),
+        "inspect_layout" => chk!(InspectLayoutParams),
+        "audit_layout" => chk!(AuditLayoutParams),
+        "inspect_style" => chk!(InspectStyleParams),
+        "apply_css" => chk!(ApplyCssParams),
+        "remove_css" => chk!(RemoveCssParams),
+        "highlight" => chk!(HighlightParams),
+        "inspect_render" => chk!(InspectRenderParams),
+        "inspect_settings" => chk!(InspectSettingsParams),
+        "override_setting" => chk!(OverrideSettingParams),
         other => Err(format!("unknown tool '{other}'")),
     }
 }

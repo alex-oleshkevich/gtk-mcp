@@ -8,8 +8,12 @@ use std::rc::Rc;
 
 pub mod batch;
 pub mod capture;
+pub mod layout;
 pub mod inspect;
 pub mod interact;
+pub mod render;
+pub mod settings;
+pub mod style;
 pub mod model;
 pub mod observe;
 pub mod props;
@@ -41,6 +45,16 @@ pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -
         "snapshot" => snapshot::snapshot(agent, parse(tool, params)?),
         "query" => query::query(agent, parse(tool, params)?),
         "inspect" => inspect::inspect(agent, parse(tool, params)?),
+        // layout-style (M3)
+        "inspect_layout" => layout::inspect_layout(agent, parse(tool, params)?),
+        "audit_layout" => layout::audit_layout(agent, parse(tool, params)?),
+        "inspect_style" => style::inspect_style(agent, parse(tool, params)?),
+        "apply_css" => style::apply_css(agent, parse(tool, params)?, ctx).await,
+        "remove_css" => style::remove_css(parse(tool, params)?, ctx).await,
+        "highlight" => style::highlight(agent, parse(tool, params)?, ctx).await,
+        "inspect_render" => render::inspect_render(agent, parse(tool, params)?, ctx).await,
+        "inspect_settings" => settings::inspect_settings(agent, parse(tool, params)?),
+        "override_setting" => settings::override_setting(agent, parse(tool, params)?, ctx),
         other => Err(AgentError::new(
             gtk_mcp_protocol::ErrorCode::NotFound,
             format!("method '{other}' is not implemented by this agent"),

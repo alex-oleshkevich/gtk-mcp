@@ -73,6 +73,30 @@ reported and nothing is retried.
 | `inspect_settings` | R | GTK settings, libadwaita style manager |
 | `override_setting` | M | Session-scoped typed override: color scheme, animations, text scale, text direction. libadwaita high contrast and accent are read-only |
 
+As built (M3):
+
+- `inspect_layout`: `for_size` measures twice: `as_width` (height requested for
+  a width of `for_size`, vertical measure) and `as_height` (horizontal measure).
+  Detached targets fail `detached`.
+- `audit_layout`: judges mapped widgets only; `checks` selects rules, `limit`
+  caps findings (`total`, `truncated`). GTK/libadwaita gizmos, scrolling
+  containers, windows and collapsed revealers are skipped by the geometry
+  rules. `GtkInscription` ellipsis lands in `unsupported`, not `findings`.
+- `apply_css`: provider at `GTK_STYLE_PROVIDER_PRIORITY_USER`, lines/columns
+  1-based. Invalid CSS returns `installed:false, handle:null` with diagnostics
+  and installs nothing; warnings do not block. A restyle reaches the next
+  frame, so `apply_css`, `remove_css` and `highlight` wait (bounded, `settled`)
+  for a frame on every mapped window; a later `capture` then shows the result.
+  Handles belong to the connection that made them; disconnect and app shutdown
+  remove all of them.
+- `inspect_render`: text nodes carry glyph count, font and colour (the bindings
+  expose no characters). Text nodes overlapping a secret widget are replaced by
+  `{"type":"text","redacted":true}`; peeking secrets refuse the call.
+- `override_setting`: `setting` is `color_scheme`, `animations`, `text_scale`
+  (factor of the pre-override `gtk-xft-dpi`) or `text_direction`; `reset:true`
+  restores one setting. Overrides are reverted when the last client holding
+  them disconnects.
+
 ## a11y
 
 AT-SPI data is fetched by the broker (`--allow-atspi`) and joined to widget

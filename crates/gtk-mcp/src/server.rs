@@ -172,6 +172,51 @@ impl Server {
     async fn diff_captures(&self, Parameters(p): Parameters<DiffCapturesParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("diff_captures", p, ctx).await
     }
+
+    #[tool(description = "Measure min/natural (optionally at for_size), allocation, baseline, margins, alignment, expand flags, size request, layout manager, parent and sibling allocations of a widget.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn inspect_layout(&self, Parameters(p): Parameters<InspectLayoutParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("inspect_layout", p, ctx).await
+    }
+
+    #[tool(description = "Layout findings with ref and evidence: ellipsized labels, children outside parent bounds, visible zero-size widgets, overlapping siblings, unresolvable icon names. GtkInscription ellipsis is reported unsupported.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn audit_layout(&self, Parameters(p): Parameters<AuditLayoutParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("audit_layout", p, ctx).await
+    }
+
+    #[tool(description = "CSS name, classes, state flags and public style information (colour, font, direction) of a widget. No computed CSS.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn inspect_style(&self, Parameters(p): Parameters<InspectStyleParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("inspect_style", p, ctx).await
+    }
+
+    #[tool(description = "Install temporary CSS on the display; parse diagnostics with line/column (invalid CSS installs nothing); returns a handle. Reverted by remove_css or when this client disconnects. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn apply_css(&self, Parameters(p): Parameters<ApplyCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("apply_css", p, ctx).await
+    }
+
+    #[tool(description = "Remove one temporary CSS provider by handle. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn remove_css(&self, Parameters(p): Parameters<RemoveCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("remove_css", p, ctx).await
+    }
+
+    #[tool(description = "Outline a widget for a human (temporary provider + class gtk-mcp-highlight), clearing this client's previous highlight; omit target to just clear. Reverted on disconnect. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn highlight(&self, Parameters(p): Parameters<HighlightParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("highlight", p, ctx).await
+    }
+
+    #[tool(description = "GSK render-node tree of a widget (type, bounds, key attributes), size-limited. Text nodes inside secret subtrees are replaced; targets containing a peeking secret are refused (redacted).", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn inspect_render(&self, Parameters(p): Parameters<InspectRenderParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("inspect_render", p, ctx).await
+    }
+
+    #[tool(description = "GtkSettings values (theme, icon theme, fonts, dark preference, animations, ...) and the libadwaita style manager when present.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn inspect_settings(&self, Parameters(p): Parameters<InspectSettingsParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("inspect_settings", p, ctx).await
+    }
+
+    #[tool(description = "Session-scoped override of color_scheme, animations, text_scale or text_direction; reverted on disconnect. libadwaita high contrast and accent are read-only. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn override_setting(&self, Parameters(p): Parameters<OverrideSettingParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("override_setting", p, ctx).await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
