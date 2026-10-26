@@ -206,7 +206,7 @@ sequenceDiagram
   App->>App: attach(app): read env, scrub GTK_MCP*, start executor
   App->>Sock: on startup: bind $XDG_RUNTIME_DIR/gtk-mcp/<pid>.sock (0700/0600)
   B->>B: scan dir; unlink sockets whose pid is gone
-  B->>Sock: connect; SO_PEERCRED uid check
+  B->>Sock: connect; SO_PEERCRED check: our effective uid, pid = the socket's name
   B->>Sock: hello {protocol, broker_version}
   Sock->>App: enqueue
   App-->>Sock: hello_ack {protocol, versions, capabilities, mutations_enabled}
@@ -500,7 +500,9 @@ this section.
 | `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | broker | bounded retention |
 
 Socket path: `<dir>/<pid>.sock` (short enough for `sun_path`); app ID and
-versions travel in the handshake.
+versions travel in the handshake. The broker only adopts a socket served by
+the process it is named after (`SO_PEERCRED` pid) whose `hello_ack.pid`
+agrees, because that pid drives launch adoption and stop signals.
 
 ## 8. How the pieces connect
 

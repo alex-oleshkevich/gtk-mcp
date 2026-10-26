@@ -192,10 +192,13 @@ impl Broker {
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            if lock(&self.sessions).iter().any(|s| s.pid() == pid) {
+            // A known session blocks only its own process: after pid reuse, a
+            // retained (exited or incompatible) session must not hide a new app.
+            let start_time = crate::session::proc_start_time(pid);
+            if lock(&self.sessions).iter().any(|s| s.is_process(pid, start_time)) {
                 continue;
             }
-            match handshake(&path, self.config.handshake_timeout) {
+            match handshake(&path, pid, self.config.handshake_timeout) {
                 Ok(h) => {
                     let id = format!("s{}", self.next_session.fetch_add(1, Ordering::Relaxed));
                     let launch = self.adopt_launch(pid);
@@ -357,10 +360,12 @@ impl Broker {
             return Err(invalid(format!("batch has {} steps; the maximum is {MAX_BATCH_STEPS}", p.steps.len())));
         }
         let mut mutating = false;
-        for (i, step) in p.steps.iter().enumerate() {
-            let s = validate_step(&step.tool, &step.arguments).map_err(|e| invalid(format!("batch step {i}: {e}")))?;
+        // Steps are numbered from 1, as in the agent's validation and `$N.ref`.
+        for (n, step) in (1..).zip(&p.steps) {
+            let at = |msg: String| invalid(format!("batch step {n}: {msg}")).with_data(serde_json::json!({"step": n}));
+            let s = validate_step(&step.tool, &step.arguments).map_err(at)?;
             if !self.is_enabled(s.name) {
-                return Err(invalid(format!("batch step {i}: tool '{}' is not enabled", s.name)));
+                return Err(at(format!("tool '{}' is not enabled", s.name)));
             }
             mutating |= s.mutating;
         }

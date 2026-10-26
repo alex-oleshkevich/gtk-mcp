@@ -7,7 +7,10 @@ use gtk_mcp_protocol::*;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::BufReader;
+use std::os::fd::{FromRawFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -97,11 +100,27 @@ impl<'a> MockBuilder<'a> {
         self
     }
     pub fn start(self) -> MockAgent {
-        let child = Command::new("sleep").arg("600").stdout(Stdio::null()).spawn().expect("spawn sleep");
-        let pid = child.id();
         std::fs::create_dir_all(self.dir).unwrap();
+        // The broker requires the socket's SO_PEERCRED pid (recorded by
+        // listen(2)) to be the pid in its name: bind here, let the `sleep`
+        // child call listen() between fork and exec, then name the socket
+        // after the child and accept on our copy of the descriptor.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tmp = self.dir.join(format!("mock-{}.tmp", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let fd = bind_unlistened(&tmp);
+        let mut cmd = Command::new("sleep");
+        cmd.arg("600").stdout(Stdio::null());
+        // SAFETY: listen(2) is async-signal-safe; the descriptor stays open in
+        // the child until exec closes it (CLOEXEC).
+        unsafe {
+            cmd.pre_exec(move || if libc::listen(fd, 128) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) });
+        }
+        let child = cmd.spawn().expect("spawn sleep");
+        let pid = child.id();
         let path = self.dir.join(format!("{pid}.sock"));
-        let listener = UnixListener::bind(&path).unwrap();
+        std::fs::rename(&tmp, &path).unwrap();
+        // SAFETY: `fd` is a listening socket we own from here on.
+        let listener = unsafe { UnixListener::from_raw_fd(fd) };
         let shared = Arc::new(Shared::default());
         *shared.scripts.lock().unwrap() = self.scripts;
         let ack = (self.ack)(pid);
@@ -116,6 +135,26 @@ impl<'a> MockBuilder<'a> {
             }
         });
         MockAgent { pid, path, shared, child }
+    }
+}
+
+/// A bound, not yet listening, close-on-exec Unix stream socket at `path`.
+fn bind_unlistened(path: &Path) -> RawFd {
+    // SAFETY: plain socket calls on a zeroed, correctly sized address.
+    unsafe {
+        let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        assert!(fd >= 0, "socket: {}", std::io::Error::last_os_error());
+        let mut addr: libc::sockaddr_un = std::mem::zeroed();
+        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        let bytes = path.as_os_str().as_bytes();
+        assert!(bytes.len() < addr.sun_path.len(), "socket path too long: {}", path.display());
+        for (d, s) in addr.sun_path.iter_mut().zip(bytes) {
+            *d = *s as libc::c_char;
+        }
+        let len = std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t;
+        let rc = libc::bind(fd, (&addr as *const libc::sockaddr_un).cast(), len);
+        assert_eq!(rc, 0, "bind {}: {}", path.display(), std::io::Error::last_os_error());
+        fd
     }
 }
 

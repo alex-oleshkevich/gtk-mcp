@@ -169,3 +169,57 @@ async fn discovery_session_resolution() {
     assert_eq!(e.code, ErrorCode::InvalidParams);
     assert!(e.message.contains("s1") && e.message.contains("s2"), "{}", e.message);
 }
+
+/// gm-dl5: the socket's pid (its name) must be the pid of the process that
+/// serves it and the pid its hello_ack reports; anything else is skipped and
+/// left alone (it is not stale), since the pid drives stop signals.
+#[tokio::test]
+async fn discovery_requires_peer_pid_and_hello_pid_to_match_the_socket_name() {
+    use std::io::BufReader;
+    let dir = tempfile::tempdir().unwrap();
+    // Served by this test process, named after a live `sleep`.
+    let mut other = Command::new("sleep").arg("60").spawn().unwrap();
+    let impostor = dir.path().join(format!("{}.sock", other.id()));
+    let listener = UnixListener::bind(&impostor).unwrap();
+    let ack = default_ack(other.id());
+    std::thread::spawn(move || {
+        for conn in listener.incoming().flatten() {
+            let ack = ack.clone();
+            std::thread::spawn(move || {
+                let mut w = conn.try_clone().unwrap();
+                let mut r = FrameReader::new(BufReader::new(conn));
+                while let Ok(Some(Frame::Line(line))) = r.next_frame() {
+                    if let Ok(Message::Request(req)) = parse_message(&line) {
+                        let _ = write_frame(&mut w, &Response::ok(req.id, serde_json::to_value(&ack).unwrap()));
+                    }
+                }
+            });
+        }
+    });
+    // Served by its own process, but the hello_ack names another pid.
+    let lying = MockAgent::builder(dir.path()).ack(|a| a.pid += 1).start();
+    let honest = MockAgent::start(dir.path());
+
+    let b = broker_with(dir.path(), Policy::default(), |_| {});
+    let apps = list(&b).await;
+    assert_eq!(apps.len(), 1, "{apps:?}");
+    assert_eq!(apps[0]["pid"], honest.pid);
+    assert!(impostor.exists() && lying.path.exists(), "live sockets are skipped, not unlinked");
+    other.kill().unwrap();
+    other.wait().unwrap();
+}
+
+/// gm-5y5: an exited session still blocks the very process it belonged to
+/// (its socket is still there), so the app is not adopted a second time.
+#[tokio::test]
+async fn discovery_exited_session_still_blocks_its_own_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockAgent::start(dir.path());
+    let b = broker_with(dir.path(), Policy::default(), |_| {});
+    assert_eq!(list(&b).await.len(), 1);
+    mock.close_connections();
+    assert!(wait_until(|| matches!(b.session("s1").unwrap().state(), SessionState::Exited { .. })));
+    let apps = list(&b).await;
+    assert_eq!(apps.len(), 1, "{apps:?}");
+    assert_eq!(apps[0]["session"], "s1");
+}

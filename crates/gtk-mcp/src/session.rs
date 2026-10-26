@@ -45,6 +45,9 @@ struct Inner {
 pub struct Session {
     id: String,
     pid: u32,
+    /// Start time of the process (`/proc/<pid>/stat`), which tells this
+    /// instance from a later process that reuses its pid.
+    start_time: Option<u64>,
     hello: Option<HelloAck>,
     inner: Mutex<Inner>,
     /// Captured stdout/stderr of a broker-launched app and `$/log` records
@@ -75,13 +78,21 @@ pub(crate) struct Handshake {
     pub ack: HelloAck,
     pub stream: UnixStream,
     pub reader: FrameReader<BufReader<UnixStream>>,
+    /// [`proc_start_time`] of the peer.
+    pub start_time: Option<u64>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+/// `(pid, start time)` pairs name the same process: equal pids and start
+/// times. A start time that could not be read does not tell processes apart.
+fn same_process(a: (u32, Option<u64>), b: (u32, Option<u64>)) -> bool {
+    a.0 == b.0 && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
+}
+
+fn peer_cred(stream: &UnixStream) -> io::Result<libc::ucred> {
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     let rc = unsafe {
@@ -93,19 +104,34 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
             &mut len,
         )
     };
-    if rc != 0 { Err(io::Error::last_os_error()) } else { Ok(cred.uid) }
+    if rc != 0 { Err(io::Error::last_os_error()) } else { Ok(cred) }
 }
 
-/// Connect, verify the peer uid, send `hello` (request id 1) and read the ack.
-pub(crate) fn handshake(path: &Path, timeout: Duration) -> Result<Handshake, HandshakeError> {
+/// Start time of process `pid` in clock ticks since boot (field 22 of
+/// `/proc/<pid>/stat`); `None` when it cannot be read.
+pub(crate) fn proc_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name (field 2) may contain spaces and ')': fields 3.. follow the last ')'.
+    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// Connect, verify the peer (our effective uid; the pid the socket is named
+/// after), send `hello` (request id 1) and read the ack, whose `pid` must be
+/// that pid as well: the pid drives launch adoption and stop signals.
+pub(crate) fn handshake(path: &Path, pid: u32, timeout: Duration) -> Result<Handshake, HandshakeError> {
     let stream = UnixStream::connect(path).map_err(|e| match e.kind() {
         io::ErrorKind::ConnectionRefused => HandshakeError::Refused,
         io::ErrorKind::NotFound => HandshakeError::Gone,
         _ => HandshakeError::Other(format!("connect: {e}")),
     })?;
-    match peer_uid(&stream) {
-        Ok(uid) if uid == unsafe { libc::getuid() } => {}
-        Ok(uid) => return Err(HandshakeError::Other(format!("peer uid {uid} differs from ours"))),
+    // SO_PEERCRED reports the effective uid of the listening process.
+    let euid = unsafe { libc::geteuid() };
+    match peer_cred(&stream) {
+        Ok(c) if c.uid != euid => return Err(HandshakeError::Other(format!("peer uid {} differs from ours", c.uid))),
+        Ok(c) if u32::try_from(c.pid).ok() != Some(pid) => {
+            return Err(HandshakeError::Other(format!("socket is named after pid {pid} but served by pid {}", c.pid)));
+        }
+        Ok(_) => {}
         Err(e) => return Err(HandshakeError::Other(format!("SO_PEERCRED: {e}"))),
     }
     let io_err = |what: &str, e: io::Error| HandshakeError::Other(format!("{what}: {e}"));
@@ -132,8 +158,12 @@ pub(crate) fn handshake(path: &Path, timeout: Duration) -> Result<Handshake, Han
             Ok(Message::Response(Response { id: Some(1), result: Some(r), .. })) => {
                 let ack: HelloAck =
                     serde_json::from_value(r).map_err(|e| HandshakeError::Other(format!("bad hello_ack: {e}")))?;
+                if ack.pid != pid {
+                    return Err(HandshakeError::Other(format!("hello_ack reports pid {}, the socket is named after {pid}", ack.pid)));
+                }
                 stream.set_read_timeout(None).map_err(|e| io_err("set_read_timeout", e))?;
-                return Ok(Handshake { ack, stream, reader });
+                // Read while connected: the verified peer is alive and owns `pid`.
+                return Ok(Handshake { ack, stream, reader, start_time: proc_start_time(pid) });
             }
             Ok(Message::Response(Response { id: Some(1), error: Some(e), .. })) => {
                 return Err(HandshakeError::Other(format!("hello rejected: {}", e.message)));
@@ -159,6 +189,7 @@ impl Session {
         let s = Arc::new(Self {
             id,
             pid,
+            start_time: h.start_time,
             hello: Some(h.ack),
             inner: Mutex::new(Inner {
                 state: if incompatible { SessionState::Incompatible } else { SessionState::Running },
@@ -195,6 +226,11 @@ impl Session {
     }
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+    /// Is this session's process the one now running as `pid`, started at
+    /// `start_time`? Unknown start times compare equal (pid alone decides).
+    pub(crate) fn is_process(&self, pid: u32, start_time: Option<u64>) -> bool {
+        same_process((self.pid, self.start_time), (pid, start_time))
     }
     pub fn hello(&self) -> Option<&HelloAck> {
         self.hello.as_ref()
@@ -325,7 +361,7 @@ impl Session {
         if let Err(e) = self.send(&req) {
             lock(&self.inner).pending.remove(&id);
             return Err(if e.kind() == io::ErrorKind::InvalidData {
-                AgentError::invalid_params(format!("request too large: {e}"))
+                AgentError::invalid_params(format!("request not sendable: {e}"))
             } else {
                 AgentError::new(ErrorCode::SessionExited, format!("write to agent failed: {e}"))
             });
@@ -485,4 +521,33 @@ fn reader_loop(s: Arc<Session>, mut reader: FrameReader<BufReader<UnixStream>>, 
     // the failing in-flight requests and the session already carry code/signal.
     let exit = s.launch.as_ref().and_then(|l| l.wait_exit(Duration::from_secs(1)));
     s.mark_exited(exit_counter.fetch_add(1, Ordering::AcqRel) + 1, exit);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// gm-5y5: a retained session only blocks discovery of its own process,
+    /// not of a later process that reuses the pid.
+    #[test]
+    fn pid_reuse_is_a_different_process() {
+        assert!(same_process((10, Some(5)), (10, Some(5))));
+        assert!(!same_process((10, Some(5)), (10, Some(6))), "same pid, later start: pid reuse");
+        assert!(!same_process((10, Some(5)), (11, Some(5))));
+        assert!(same_process((10, None), (10, Some(6))), "unknown start time: the pid decides");
+        assert!(same_process((10, Some(5)), (10, None)));
+    }
+
+    #[test]
+    fn start_time_of_a_live_process_is_stable() {
+        let me = std::process::id();
+        let t = proc_start_time(me).expect("own start time");
+        assert_eq!(proc_start_time(me), Some(t));
+        let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        let c = proc_start_time(child.id()).expect("child start time");
+        assert!(c >= t, "the child started after us");
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(proc_start_time(child.id()), None, "a reaped process has no start time");
+    }
 }

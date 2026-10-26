@@ -19,6 +19,9 @@ const MAX_LINE: usize = 16 * 1024;
 /// How long the exit status waits for the output pipes to drain, so that the
 /// last lines (e.g. a panic message) are in the log before the exit is visible.
 const DRAIN_GRACE: Duration = Duration::from_millis(500);
+/// How often a reaped launch's process group is probed until it empties.
+/// Reusing that id needs the pid counter to wrap around, which takes far longer.
+const GROUP_POLL: Duration = Duration::from_millis(50);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -170,6 +173,9 @@ pub struct Launch {
     cv: Condvar,
     /// The child was reaped (set before `exit` is published).
     reaped: AtomicBool,
+    /// The process group was seen empty after the leader was reaped. From then
+    /// on its id may belong to an unrelated group and is never signalled.
+    group_gone: AtomicBool,
     /// A session adopted this launch.
     attached: AtomicBool,
 }
@@ -236,6 +242,7 @@ impl Launch {
             status: Mutex::new(Status { exit: None, readers: 2 }),
             cv: Condvar::new(),
             reaped: AtomicBool::new(false),
+            group_gone: AtomicBool::new(false),
             attached: AtomicBool::new(false),
         });
         let out = child.stdout.take().expect("piped stdout");
@@ -269,6 +276,19 @@ impl Launch {
                 }
                 st.exit = Some(exit);
                 l.cv.notify_all();
+                drop(st);
+                // Watch the group until it empties and latch that, so its id is
+                // never signalled after it could have been reused. Weak: the
+                // watch does not keep a dropped launch alive.
+                let weak = Arc::downgrade(&l);
+                drop(l);
+                while let Some(l) = weak.upgrade() {
+                    if !l.group_alive() {
+                        break;
+                    }
+                    drop(l);
+                    std::thread::sleep(GROUP_POLL);
+                }
             })
             .expect("spawn waiter");
         Ok(launch)
@@ -310,10 +330,23 @@ impl Launch {
 
     /// The process group still has members (the leader may be gone already).
     /// A group with members keeps its id reserved, so a successful probe after
-    /// the leader was reaped means our remaining members.
+    /// the leader was reaped means our remaining members. Once a reaped
+    /// launch's group is seen empty that is latched: the id may be reused by an
+    /// unrelated group, which must never be reported (or signalled) as ours.
     pub fn group_alive(&self) -> bool {
+        if self.group_gone.load(Ordering::Acquire) {
+            return false;
+        }
+        // Read before probing: an empty group only counts once the leader is reaped.
+        let reaped = self.reaped();
         // SAFETY: signal 0 only probes.
-        unsafe { libc::kill(-(self.pid as i32), 0) == 0 }
+        if unsafe { libc::kill(-(self.pid as i32), 0) } == 0 {
+            return true;
+        }
+        if reaped {
+            self.group_gone.store(true, Ordering::Release);
+        }
+        false
     }
 
     /// Signal the whole process group; `false` when it is already gone.
@@ -453,5 +486,25 @@ mod tests {
         let plan = spec.env_plan(Path::new("/run/x"), true, &["GTK_MCP_MUTATIONS".into()]);
         assert_eq!(plan.set["GTK_MCP_MUTATIONS"], "1");
         assert!(plan.remove.is_empty());
+    }
+
+    /// gm-3n1: once the reaped launch's group empties, the waiter latches it
+    /// on its own (no caller has to probe first), and the id is never
+    /// signalled again even if an unrelated group took it over.
+    #[test]
+    fn emptied_group_is_latched_and_never_signalled() {
+        let spec = LaunchSpec::from_params(params(&["sh", "-c", "sleep 1.5 >/dev/null 2>&1 & exit 0"])).unwrap();
+        let plan = spec.env_plan(Path::new("/nonexistent"), false, &[]);
+        let l = Launch::spawn(spec, &plan, 16).unwrap();
+        assert_eq!(l.wait_exit(Duration::from_secs(5)).and_then(|e| e.code), Some(0));
+        assert!(l.reaped());
+        assert!(l.group_alive(), "the background sleep keeps the group");
+        let end = Instant::now() + Duration::from_secs(5);
+        while !l.group_gone.load(Ordering::Acquire) {
+            assert!(Instant::now() < end, "the emptied group was never latched");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!l.group_alive());
+        assert!(!l.signal_group(0));
     }
 }

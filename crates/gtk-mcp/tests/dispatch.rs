@@ -227,7 +227,8 @@ async fn dispatch_excluded_tool_is_absent_from_dispatch() {
         .call_tool("batch", json!({"steps":[{"tool":"capture","arguments":{"target":"w1"}}]}))
         .await
         .unwrap_err();
-    assert!(e.message.contains("step 0"), "{}", e.message);
+    assert!(e.message.contains("batch step 1:"), "{}", e.message);
+    assert_eq!(e.data, Some(json!({"step": 1})), "steps are numbered from 1, as in the agent and $N.ref");
 }
 
 // -- mutation gate ----------------------------------------------------------
@@ -271,6 +272,22 @@ async fn dispatch_mutation_gate_both_on_forwards() {
     assert_eq!(reqs[0].2["operation"], "activate");
 }
 
+/// gm-n4j: a request nested deeper than the agent can parse fails at once
+/// instead of reaching the agent as an unparsable frame and hanging until the
+/// deadline.
+#[tokio::test]
+async fn dispatch_too_deeply_nested_request_fails_at_once() {
+    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(true).start(), allow_all(), 30_000);
+    let value = (0..MAX_FRAME_NESTING).fold(json!(1), |v, _| json!([v]));
+    let t = std::time::Instant::now();
+    let e = b.call_tool("set_property", json!({"session":"s1","target":"w1","name":"x","value":value})).await.unwrap_err();
+    assert!(t.elapsed() < Duration::from_secs(5), "answered without waiting for the deadline");
+    assert_eq!(e.code, ErrorCode::InvalidParams);
+    assert!(e.message.contains("levels deep"), "{}", e.message);
+    assert!(mock.requests().is_empty());
+    b.call_tool("list_windows", json!({"session":"s1"})).await.unwrap();
+}
+
 // -- batch ------------------------------------------------------------------
 
 #[tokio::test]
@@ -279,7 +296,7 @@ async fn batch_read_only_runs_with_mutations_off() {
     let steps = json!([
         {"tool":"query","arguments":{"selector":{"text":"Save"}}},
         {"tool":"list_windows","arguments":{}},
-        {"tool":"wait_for","arguments":{"condition":"exists","target":"$0.ref"}},
+        {"tool":"wait_for","arguments":{"condition":"exists","target":"$1.ref"}},
     ]);
     b.call_tool("batch", json!({"session":"s1","steps":steps})).await.unwrap();
     let reqs = mock.requests();
@@ -311,7 +328,9 @@ async fn batch_invalid_step_sends_nothing() {
     for steps in bad_cases {
         let e = b.call_tool("batch", json!({"session":"s1","steps":steps})).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidParams);
-        assert!(e.message.contains("step 2"), "{}", e.message);
+        // gm-88s: the third step is "step 3", as the agent and `$3.ref` count it.
+        assert!(e.message.contains("batch step 3:"), "{}", e.message);
+        assert_eq!(e.data, Some(json!({"step": 3})));
     }
     let many: Vec<Value> = (0..101).map(|_| json!({"tool":"list_windows","arguments":{}})).collect();
     let e = b.call_tool("batch", json!({"session":"s1","steps":many})).await.unwrap_err();
