@@ -314,18 +314,13 @@ pub async fn highlight(agent: &Rc<Agent>, p: HighlightParams, ctx: &Ctx) -> Resu
         let settled = settle_style(ctx).await;
         return Ok(json!({"highlighted": false, "cleared": cleared, "settled": settled}));
     };
-    w.add_css_class(HIGHLIGHT_CLASS);
-    let installed = match install(conn, HIGHLIGHT_CSS, Some(&w)) {
-        Ok(i) => i,
-        Err(e) => {
-            w.remove_css_class(HIGHLIGHT_CLASS);
-            return Err(e);
-        }
-    };
+    // Install first: a failed install must not touch the class, which another
+    // client's highlight of the same widget may hold.
+    let installed = install(conn, HIGHLIGHT_CSS, Some(&w))?;
     let Some(handle) = installed.handle else {
-        w.remove_css_class(HIGHLIGHT_CLASS);
         return Err(AgentError::new(ErrorCode::Unavailable, "the highlight stylesheet did not parse"));
     };
+    w.add_css_class(HIGHLIGHT_CLASS);
     let settled = settle_style(ctx).await;
     Ok(json!({
         "highlighted": true,

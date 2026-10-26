@@ -392,6 +392,38 @@ async fn highlight_outlines_hides_its_class_and_reverts() {
     eventually("the dropped client's highlight to disappear", 15, async || shot(&c, "m3-styled").await == original).await;
 }
 
+/// gm-cse: a highlight that fails to install (the client is at its provider
+/// cap) must not strip the class from a widget another client highlights.
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_highlight_keeps_another_clients_highlight() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = rw(&fx);
+    scroll_section(&c).await;
+    let magenta = |p: &image::Rgba<u8>| near(p, (0xff, 0x2b, 0xd6), 12);
+    let mut raw = Raw::connect(&fx);
+    raw.call("highlight", json!({"target": by_id("m3-styled")})).unwrap();
+    assert!(count_pixels(&shot(&c, "m3-styled").await, magenta) > 100);
+
+    // Fill this client's provider budget, then highlight the same widget.
+    let mut handles = Vec::new();
+    loop {
+        match c.call("apply_css", json!({"css": format!(".gm-cse-{} {{ }}", handles.len())})).await {
+            Ok(out) => handles.push(out.json_content().unwrap()["handle"].as_str().unwrap().to_owned()),
+            Err(e) => {
+                assert_eq!(e.code, ErrorCode::InvalidValue, "{e}");
+                break;
+            }
+        }
+        assert!(handles.len() <= 64, "the per-client provider cap is 64");
+    }
+    let e = c.err("highlight", json!({"target": by_id("m3-styled")})).await;
+    assert_eq!(e.code, ErrorCode::InvalidValue, "{e}");
+    // remove_css waits until the restyle reached a frame, so a stripped class would show.
+    c.json("remove_css", json!({"handle": handles[0]})).await;
+    assert!(count_pixels(&shot(&c, "m3-styled").await, magenta) > 100, "the other client's highlight is still drawn");
+}
+
 // ---- inspect_render --------------------------------------------------------------
 
 fn collect_types(v: &Value, out: &mut Vec<String>) {

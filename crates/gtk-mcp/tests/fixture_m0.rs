@@ -192,6 +192,38 @@ async fn snapshot_popover_in_place_list_realized_truncation() {
     assert_eq!(lbl["text_truncated"], true);
 }
 
+fn count_cut(v: &Value) -> usize {
+    usize::from(v["children_truncated"] == true)
+        + v["children"].as_array().into_iter().flatten().chain(v["roots"].as_array().into_iter().flatten()).map(count_cut).sum::<usize>()
+}
+
+/// gm-1ss: `max_nodes` is one budget across all roots. gm-5cj: the semantic
+/// view keeps every node `max_depth` cut, with its marker.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_budget_spans_roots_and_semantic_view_keeps_cut_nodes() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = Client { broker: fx.broker(true) };
+    c.json("interact", json!({"target": {"automation_id": "open-second-window"}, "operation": "activate"})).await;
+    let all = c.snapshot_json(json!({})).await;
+    let roots = all["roots"].as_array().unwrap().len();
+    assert!(roots >= 2, "{roots} roots");
+
+    let one = c.snapshot_json(json!({"max_nodes": 1})).await;
+    assert_eq!(one["roots"].as_array().unwrap().len(), 1, "{one}");
+    assert_eq!(one["node_count"], 1);
+    assert_eq!(one["truncated"], true);
+    assert_eq!(one["omitted_roots"], roots - 1);
+    let text = c.call("snapshot", json!({"max_nodes": 1, "format": "text"})).await.unwrap();
+    assert!(text.text_content().contains(&format!("… {} more roots (truncated)", roots - 1)), "{}", text.text_content());
+
+    let full = c.snapshot_json(json!({"max_depth": 2})).await;
+    let sem = c.snapshot_json(json!({"max_depth": 2, "view": "semantic"})).await;
+    assert!(count_cut(&full) > 0);
+    assert_eq!(count_cut(&sem), count_cut(&full), "every cut node keeps its marker in the semantic view");
+    assert_eq!(sem["truncated"], true);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_semantic_view_keeps_hierarchy_and_marks_elision() {
     let display = require_display!();

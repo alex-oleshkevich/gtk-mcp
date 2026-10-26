@@ -168,6 +168,10 @@ fn interesting(n: &Value) -> bool {
     if o.contains_key("root_kind") || o.contains_key("secret") || o.contains_key("native") || o.contains_key("attached") {
         return true;
     }
+    // A cut node keeps its truncation marker (widget-tree.md: truncation is explicit).
+    if o.contains_key("children_truncated") {
+        return true;
+    }
     for k in ["label", "text", "title", "text_redacted", "value", "children_collapsed"] {
         if o.contains_key(k) {
             return true;
@@ -212,13 +216,20 @@ pub fn count_nodes(n: &Value) -> usize {
 }
 
 /// Build the node tree under `root_widgets` (shared by `snapshot` and `observe`).
+/// `max_nodes` is one budget across all roots: roots that no longer fit are
+/// left out and counted in `omitted_roots`.
 pub fn build(agent: &Agent, roots: &[gtk::Widget], limits: &Limits, view: &SnapshotView) -> Value {
     let mut nodes = Vec::new();
     let mut truncated = false;
     let mut count = 0usize;
-    for root in roots {
+    let mut omitted_roots = 0usize;
+    for (i, root) in roots.iter().enumerate() {
+        if count >= limits.max_nodes {
+            omitted_roots = roots.len() - i;
+            truncated = true;
+            break;
+        }
         let mut b = Builder { agent, root: root.clone(), limits, count, truncated: false };
-        // The budget is shared across roots.
         let node = b.node(root, true, None, 0, true);
         count = b.count;
         truncated |= b.truncated;
@@ -235,12 +246,16 @@ pub fn build(agent: &Agent, roots: &[gtk::Widget], limits: &Limits, view: &Snaps
         nodes = sem;
     }
     let node_count: usize = nodes.iter().map(count_nodes).sum();
-    json!({
+    let mut v = json!({
         "roots": nodes,
         "node_count": node_count,
         "complete": !truncated,
         "truncated": truncated,
-    })
+    });
+    if omitted_roots > 0 {
+        v["omitted_roots"] = json!(omitted_roots);
+    }
+    v
 }
 
 pub fn snapshot(agent: &Rc<Agent>, p: SnapshotParams) -> Result<Value, AgentError> {
@@ -277,4 +292,31 @@ pub fn snapshot(agent: &Rc<Agent>, p: SnapshotParams) -> Result<Value, AgentErro
     o.insert("snapshot_id".into(), json!(format!("snap-{seq}")));
     o.insert("sequence".into(), json!(seq));
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// gm-5cj: a structural node cut by `max_depth`/`max_nodes` survives the
+    /// semantic view with its marker; plain structural nodes are still elided.
+    #[test]
+    fn semantic_view_keeps_cut_nodes() {
+        let root = json!({
+            "ref": "w1", "root_kind": "window", "state": {}, "children": [
+                {"ref": "w2", "type": "GtkBox", "state": {}, "children": [
+                    {"ref": "w3", "type": "GtkBox", "state": {}, "children_truncated": true, "omitted_children": 4, "children": []},
+                    {"ref": "w4", "type": "GtkBox", "state": {}, "children": []},
+                ]},
+            ],
+        });
+        let (nodes, elided) = compress(root);
+        assert_eq!(elided, 0);
+        let kids = nodes[0]["children"].as_array().unwrap();
+        assert_eq!(kids.len(), 1, "{kids:?}");
+        assert_eq!(kids[0]["ref"], "w3");
+        assert_eq!(kids[0]["children_truncated"], true);
+        assert_eq!(kids[0]["omitted_children"], 4);
+        assert_eq!(nodes[0]["elided_children"], 2, "w2 and w4 were elided");
+    }
 }

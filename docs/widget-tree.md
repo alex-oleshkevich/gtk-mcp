@@ -66,7 +66,8 @@ widgets may be elided. Elision is marked in JSON (`elided_children`) and in
 text (`… 3 structural widgets`). Semantic view never invents nodes and never
 changes parentage of the nodes it keeps: an elided node's kept descendants
 stay attached to their nearest kept ancestor, and the elision marker records
-that the path is compressed.
+that the path is compressed. A node cut by `max_depth` or `max_nodes` is
+always kept, so its `children_truncated` marker survives.
 
 The default remains `full`: this is a GTK development tool, and layout bugs
 usually live in the structural widgets a semantic view would hide.
@@ -208,7 +209,8 @@ Rules:
 - **Truncation is explicit.** When `max_nodes` or `max_depth` cuts the tree,
   the response sets `truncated: true`, reports `node_count` for the nodes
   returned, and marks each cut node with `children_truncated: true` plus the
-  omitted count when known.
+  omitted count when known. `max_nodes` is one budget for all roots: roots
+  that no longer fit are left out and counted in `omitted_roots`.
 - **Ordering is GTK child order**, followed by detached content.
 
 ## Text and redaction

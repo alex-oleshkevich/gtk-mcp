@@ -13,6 +13,9 @@ pub fn render_text(snapshot: &Value, text_limit: usize) -> String {
             node_line(&mut out, "", "", root, None, text_limit);
         }
     }
+    if let Some(n) = snapshot.get("omitted_roots").and_then(Value::as_u64) {
+        let _ = writeln!(out, "… {n} more roots (truncated)");
+    }
     if snapshot.get("truncated").and_then(Value::as_bool) == Some(true) {
         let _ = writeln!(
             out,
