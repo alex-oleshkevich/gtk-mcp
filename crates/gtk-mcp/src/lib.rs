@@ -4,12 +4,16 @@
 
 pub mod broker;
 pub mod diff;
+pub mod launch;
+pub mod lifecycle;
 pub mod policy;
 pub mod ring;
 pub mod server;
 pub mod session;
 
 pub use broker::{Broker, Content, MAX_BATCH_STEPS, ToolOutcome};
+pub use lifecycle::StateResource;
+pub use launch::{ExitInfo, Launch, LaunchSpec};
 pub use policy::{Config, Policy};
 pub use ring::{Entry, Read};
 pub use session::{Progress, ProgressSink, Session};

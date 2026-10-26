@@ -202,7 +202,7 @@ pub fn note_skip(what: &str) {
     SKIP_NOTE.get_or_init(|| eprintln!("SKIPPED ({what}): no Wayland display available"));
 }
 
-fn fixture_binary() -> PathBuf {
+pub fn fixture_binary() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     // target/<profile>/deps/<test> -> target/<profile>
     let profile_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();

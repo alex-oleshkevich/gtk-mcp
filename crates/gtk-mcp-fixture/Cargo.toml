@@ -9,3 +9,4 @@ gtk-mcp-agent.workspace = true
 gtk4.workspace = true
 libadwaita = { version = "0.9", features = ["v1_5"] }
 serde_json.workspace = true
+libc.workspace = true

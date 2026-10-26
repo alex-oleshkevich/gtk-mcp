@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::rc::Rc;
 
 pub mod actions;
+pub mod app;
 pub mod batch;
 pub mod capture;
 pub mod layout;
@@ -68,6 +69,12 @@ pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -
         "inspect_shortcuts" => shortcuts::inspect_shortcuts(agent, parse(tool, params)?),
         "activate_shortcut" => shortcuts::activate_shortcut(agent, parse(tool, params)?, ctx).await,
         "inspect_controllers" => controllers::inspect_controllers(agent, parse(tool, params)?),
+        "app_open" => app::app_open(agent, parse(tool, params)?),
+        "inspect_gsettings" => app::inspect_gsettings(agent, parse(tool, params)?),
+        "set_gsetting" => app::set_gsetting(agent, parse(tool, params)?),
+        "list_resources" => app::list_resources(parse(tool, params)?),
+        "read_resource" => app::read_resource(parse(tool, params)?),
+        "object_stats" => app::object_stats(agent, parse(tool, params)?),
         other => Err(AgentError::new(
             gtk_mcp_protocol::ErrorCode::NotFound,
             format!("method '{other}' is not implemented by this agent"),

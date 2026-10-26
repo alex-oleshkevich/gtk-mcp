@@ -28,6 +28,8 @@ pub struct Agent {
     pub config: Config,
     pub registry: Registry,
     pub app: gtk::Application,
+    /// `register_state` closures and registered `GSettings` objects.
+    pub app_state: crate::state::AppState,
     snapshot_seq: Cell<u64>,
     capture_seq: Cell<u64>,
     socket: RefCell<Option<SocketHandle>>,
@@ -39,6 +41,7 @@ impl Agent {
             config,
             registry: Registry::default(),
             app,
+            app_state: Default::default(),
             snapshot_seq: Cell::new(0),
             capture_seq: Cell::new(0),
             socket: RefCell::new(None),
@@ -98,6 +101,9 @@ impl Agent {
         }
         if sym_present(c"gtk_accessible_get_accessible_id") {
             caps.push(Capability::AccessibleId);
+        }
+        if self.config.instance_count {
+            caps.push(Capability::InstanceCount);
         }
         HelloAck {
             protocol: PROTOCOL_VERSION,
@@ -216,6 +222,10 @@ async fn handle(agent: Rc<Agent>, req: Req) {
             Ok(_) => Ok(serde_json::to_value(agent.hello_ack()).expect("HelloAck serializes")),
             Err(e) => Err(AgentError::invalid_params(format!("invalid hello: {e}"))),
         };
+        req.conn.respond(req.id, res);
+        return;
+    }
+    if let Some(res) = crate::state::handle(&agent, &req.method, &req.params) {
         req.conn.respond(req.id, res);
         return;
     }

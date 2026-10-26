@@ -905,6 +905,7 @@ dependencies = [
  "gtk-mcp-agent",
  "gtk4",
  "libadwaita",
+ "libc",
  "serde_json",
 ]
 

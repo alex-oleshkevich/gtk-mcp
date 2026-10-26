@@ -57,9 +57,16 @@ async fn main() -> anyhow::Result<()> {
         ..Config::default()
     };
     let broker = Broker::new(policy, config).map_err(|e| anyhow::anyhow!(e))?;
-    let server = Server::new(broker).map_err(|e| anyhow::anyhow!(e))?;
+    let server = Server::new(broker.clone()).map_err(|e| anyhow::anyhow!(e))?;
     eprintln!("gtk-mcp {} starting (stdio)", env!("CARGO_PKG_VERSION"));
     let service = server.serve(stdio()).await?;
-    let _ = service.waiting().await;
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        _ = service.waiting() => {}
+        _ = term.recv() => {}
+        _ = tokio::signal::ctrl_c() => {}
+    }
+    // Apps launched by this broker do not outlive it.
+    broker.shutdown();
     Ok(())
 }

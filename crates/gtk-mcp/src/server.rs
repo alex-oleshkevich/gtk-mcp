@@ -10,7 +10,10 @@ use gtk_mcp_protocol::*;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, ProgressNotificationParam, ServerCapabilities, ServerConfig},
+    model::{
+        CallToolResult, ContentBlock, ListResourcesResult, PaginatedRequestParams, ProgressNotificationParam, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    },
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
@@ -219,13 +222,97 @@ impl Server {
     async fn override_setting(&self, Parameters(p): Parameters<OverrideSettingParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("override_setting", p, ctx).await
     }
+
+    #[tool(description = "Launch an app (argv, no shell) under broker control with GTK presets (no_portals, instance_count, a11y, language, gsk_renderer, gtk_debug), optional wayland_display/xdg_runtime_dir, cwd and env (GTK_MCP* rejected). stdout/stderr are captured; waits for the app's agent socket and returns the session. Needs --allow-launch.", annotations(destructive_hint = true))]
+    async fn launch_app(&self, Parameters(p): Parameters<LaunchAppParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("launch_app", p, ctx).await
+    }
+
+    #[tool(description = "Stop a broker-launched app (SIGTERM to its process group, SIGKILL after timeout_ms, default 3000) and launch it again with the same arguments; returns the new session. The old session stays listed as exited. Needs --allow-launch; refuses apps the broker did not launch.", annotations(destructive_hint = true))]
+    async fn restart_app(&self, Parameters(p): Parameters<RestartAppParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("restart_app", p, ctx).await
+    }
+
+    #[tool(description = "Stop a broker-launched app: SIGTERM to its process group, SIGKILL after timeout_ms (default 3000). Needs --allow-launch; refuses apps the broker did not launch.", annotations(destructive_hint = true))]
+    async fn stop_app(&self, Parameters(p): Parameters<StopAppParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("stop_app", p, ctx).await
+    }
+
+    #[tool(description = "g_application_open with files (paths or URIs, optional hint), or g_application_activate. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn app_open(&self, Parameters(p): Parameters<AppOpenParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("app_open", p, ctx).await
+    }
+
+    #[tool(description = "The app's GSettings schemas (settings objects it registered, schemas under its app id) with keys, types, ranges, defaults and current values; or one schema by id.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn inspect_gsettings(&self, Parameters(p): Parameters<InspectGsettingsParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("inspect_gsettings", p, ctx).await
+    }
+
+    #[tool(description = "Write a GSettings key (JSON value converted by the key's type, or GVariant text) with type and range validation; returns the previous and observed values. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    async fn set_gsetting(&self, Parameters(p): Parameters<SetGsettingParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("set_gsetting", p, ctx).await
+    }
+
+    #[tool(description = "Registered GResource paths under a path (default /), optionally recursive, with sizes.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn list_resources(&self, Parameters(p): Parameters<ListResourcesParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("list_resources", p, ctx).await
+    }
+
+    #[tool(description = "Read one GResource, size-limited (max_bytes, default 65536, at most 1048576): UTF-8 text or base64.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn read_resource(&self, Parameters(p): Parameters<ReadResourceParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("read_resource", p, ctx).await
+    }
+
+    #[tool(description = "Live instance counts per GObject type. Unavailable unless the app started with GOBJECT_DEBUG=instance-count (launch_app preset instance_count).", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    async fn object_stats(&self, Parameters(p): Parameters<ObjectStatsParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+        self.run("object_stats", p, ctx).await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        let caps = ServerCapabilities::builder().enable_tools();
+        let caps = if self.broker.resources_enabled() { caps.enable_resources().build() } else { caps.build() };
+        ServerConfig::new(caps)
             .with_server_info(rmcp::model::Implementation::new("gtk-mcp", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Inspect and exercise a running GTK4 app from inside its process. Call list_apps first; `session` may be omitted when exactly one app is running. Mutating tools need --allow-mutations on the broker and GTK_MCP_MUTATIONS=1 in the app.")
+            .with_instructions("Inspect and exercise a running GTK4 app from inside its process. Call list_apps first; `session` may be omitted when exactly one app is running. Mutating tools need --allow-mutations on the broker and GTK_MCP_MUTATIONS=1 in the app; launch_app, restart_app and stop_app need --allow-launch. With the `app` toolset, state the app registered with register_state is served as resources gtk-mcp://<session>/app-state/<name>.")
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _ctx: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let mut r = ListResourcesResult::default();
+        r.resources = self
+            .broker
+            .list_state_resources()
+            .await
+            .into_iter()
+            .map(|s| {
+                Resource::new(s.uri, format!("{}/{STATE_PREFIX}{}", s.session, s.name))
+                    .with_description(format!("App state '{}' registered by the app of session {} (register_state)", s.name, s.session))
+                    .with_mime_type("application/json")
+            })
+            .collect();
+        Ok(r)
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _ctx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        match self.broker.read_state_resource(&request.uri).await {
+            Ok(v) => Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(serde_json::to_string_pretty(&v).unwrap_or_default(), request.uri).with_mime_type("application/json"),
+            ])
+            .into()),
+            Err(e) if e.code == ErrorCode::InvalidParams || e.code == ErrorCode::NotFound => {
+                Err(ErrorData::resource_not_found(e.message.clone(), serde_json::to_value(&e).ok()))
+            }
+            Err(e) => Err(ErrorData::internal_error(e.message.clone(), serde_json::to_value(&e).ok())),
+        }
     }
 }

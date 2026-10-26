@@ -1,6 +1,7 @@
 //! One connection to one instrumented app: handshake, request multiplexing,
 //! deadlines, notification buffers, and exit tracking (`docs/plan.md` 4.2, 5.1, 5.2).
 
+use crate::launch::{ExitInfo, Launch};
 use crate::ring::{Read, Ring, Store};
 use gtk_mcp_protocol::{
     AgentError, ErrorCode, Frame, FrameReader, Hello, HelloAck, LateResult, Message, Notification, PROTOCOL_VERSION,
@@ -39,7 +40,6 @@ struct Inner {
     pending: HashMap<u64, Pending>,
     next_id: u64,
     events: Ring,
-    logs: Ring,
 }
 
 pub struct Session {
@@ -47,6 +47,11 @@ pub struct Session {
     pid: u32,
     hello: Option<HelloAck>,
     inner: Mutex<Inner>,
+    /// Captured stdout/stderr of a broker-launched app and `$/log` records
+    /// forwarded by the app; shared with the [`Launch`] when there is one.
+    logs: Arc<Mutex<Ring>>,
+    /// Set for apps this broker launched.
+    launch: Option<Arc<Launch>>,
     writer: Mutex<Option<UnixStream>>,
     /// 0 while alive; otherwise the order in which sessions exited (for retention).
     exit_seq: AtomicU64,
@@ -146,6 +151,7 @@ impl Session {
         retain_snapshots: usize,
         retain_captures: usize,
         exit_counter: Arc<AtomicU64>,
+        launch: Option<Arc<Launch>>,
     ) -> Arc<Self> {
         let incompatible = h.ack.protocol != PROTOCOL_VERSION;
         let s = Arc::new(Self {
@@ -157,8 +163,9 @@ impl Session {
                 pending: HashMap::new(),
                 next_id: 2, // 1 was the hello
                 events: Ring::new(ring_capacity),
-                logs: Ring::new(ring_capacity),
             }),
+            logs: launch.as_ref().map_or_else(|| Arc::new(Mutex::new(Ring::new(ring_capacity))), |l| l.logs.clone()),
+            launch,
             writer: Mutex::new(None),
             exit_seq: AtomicU64::new(0),
             snapshots: Mutex::new(Store::new(retain_snapshots)),
@@ -193,17 +200,69 @@ impl Session {
         self.hello.as_ref().is_some_and(|h| h.mutations_enabled)
     }
     pub fn state(&self) -> SessionState {
-        lock(&self.inner).state.clone()
+        let st = lock(&self.inner).state.clone();
+        // The socket can close a moment before the child is reaped: fill in the
+        // exit status once the launcher knows it.
+        if let (SessionState::Exited { code: None, signal: None, in_flight }, Some(e)) =
+            (&st, self.launch.as_ref().and_then(|l| l.exit()))
+        {
+            return SessionState::Exited { code: e.code, signal: e.signal, in_flight: *in_flight };
+        }
+        st
+    }
+    /// The launch record when this broker started the app.
+    pub fn launch(&self) -> Option<&Arc<Launch>> {
+        self.launch.as_ref()
+    }
+    pub fn launched_by_broker(&self) -> bool {
+        self.launch.is_some()
+    }
+    /// Last `n` captured log entries (stdout/stderr lines and forwarded records), oldest first.
+    pub fn log_tail(&self, n: usize) -> Vec<Value> {
+        let g = lock(&self.logs);
+        let next = g.since(u64::MAX).next_cursor;
+        g.since(next.saturating_sub(n as u64)).entries.into_iter().map(|e| e.value).collect()
+    }
+    /// Retained buffers of an exited session (`docs/plan.md` 5.5): exit status,
+    /// in-flight request id, log and event counts and the last log lines.
+    pub fn post_mortem(&self) -> Option<Value> {
+        let SessionState::Exited { code, signal, in_flight } = self.state() else { return None };
+        let logs = self.logs_since(0);
+        let events = self.events_since(0);
+        Some(json!({
+            "code": code,
+            "signal": signal,
+            "in_flight": in_flight,
+            "logs": {
+                "retained": logs.entries.len(),
+                "next_cursor": logs.next_cursor,
+                "dropped_total": logs.dropped_total,
+                "last": self.log_tail(20),
+            },
+            "events": { "retained": events.entries.len(), "next_cursor": events.next_cursor, "dropped_total": events.dropped_total },
+        }))
     }
     pub fn info(&self) -> SessionInfo {
         SessionInfo {
             session: self.id.clone(),
             pid: self.pid,
             app_id: self.hello.as_ref().and_then(|h| h.app_id.clone()),
-            launched_by_broker: false,
+            launched_by_broker: self.launch.is_some(),
             state: self.state(),
             hello: self.hello.clone(),
         }
+    }
+    /// One `list_apps` entry: the contract `SessionInfo`, plus `launch` for
+    /// broker-launched apps and `post_mortem` for exited sessions.
+    pub fn listing(&self) -> Value {
+        let mut v = serde_json::to_value(self.info()).expect("SessionInfo serializes");
+        if let Some(l) = &self.launch {
+            v["launch"] = l.info_json();
+        }
+        if let Some(pm) = self.post_mortem() {
+            v["post_mortem"] = pm;
+        }
+        v
     }
     /// Ids of requests currently awaiting a response, ascending.
     pub fn in_flight(&self) -> Vec<u64> {
@@ -217,7 +276,7 @@ impl Session {
     }
     /// `$/log` params with `cursor >= cursor`.
     pub fn logs_since(&self, cursor: u64) -> Read {
-        lock(&self.inner).logs.since(cursor)
+        lock(&self.logs).since(cursor)
     }
     pub(crate) fn exit_seq(&self) -> u64 {
         self.exit_seq.load(Ordering::Acquire)
@@ -315,7 +374,7 @@ impl Session {
                 lock(&self.inner).events.push(n.params);
             }
             method::LOG => {
-                lock(&self.inner).logs.push(n.params);
+                lock(&self.logs).push(n.params);
             }
             method::LATE_RESULT => match serde_json::from_value::<LateResult>(n.params) {
                 Ok(l) => {
@@ -347,11 +406,11 @@ impl Session {
         }
     }
 
-    fn mark_exited(&self, seq: u64) {
+    fn mark_exited(&self, seq: u64, exit: Option<ExitInfo>) {
         let (pending, state) = {
             let mut g = lock(&self.inner);
             let in_flight = g.pending.keys().min().copied();
-            g.state = SessionState::Exited { code: None, signal: None, in_flight };
+            g.state = SessionState::Exited { code: exit.and_then(|e| e.code), signal: exit.and_then(|e| e.signal), in_flight };
             (std::mem::take(&mut g.pending), g.state.clone())
         };
         self.exit_seq.store(seq, Ordering::Release);
@@ -407,5 +466,8 @@ fn reader_loop(s: Arc<Session>, mut reader: FrameReader<BufReader<UnixStream>>, 
             Ok(None) | Err(_) => break,
         }
     }
-    s.mark_exited(exit_counter.fetch_add(1, Ordering::AcqRel) + 1);
+    // A launched child is reaped moments after its socket closes; wait briefly so
+    // the failing in-flight requests and the session already carry code/signal.
+    let exit = s.launch.as_ref().and_then(|l| l.wait_exit(Duration::from_secs(1)));
+    s.mark_exited(exit_counter.fetch_add(1, Ordering::AcqRel) + 1, exit);
 }

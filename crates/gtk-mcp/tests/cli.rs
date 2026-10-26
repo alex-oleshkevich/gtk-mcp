@@ -39,7 +39,7 @@ fn cli_unknown_toolset_fails_startup() {
 #[test]
 fn cli_tool_of_unselected_toolset_fails_startup() {
     // not registered in this build
-    startup_failure(&["--tools", "launch_app"], "launch_app");
+    startup_failure(&["--tools", "set_gsetting"], "set_gsetting");
 }
 
 struct Client {
@@ -113,13 +113,13 @@ impl Drop for Client {
 }
 
 #[test]
-fn stdio_lists_all_18_tools_with_annotations() {
+fn stdio_lists_all_core_tools_with_annotations() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &[]);
     let tools = c.tools();
     let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core").map(|t| t.name).collect();
-    assert_eq!(tools.len(), 18);
+    assert_eq!(tools.len(), expected.len());
     assert_eq!(names, expected);
     for t in &tools {
         let spec = TOOLS.iter().find(|s| s.name == t["name"].as_str().unwrap()).unwrap();
@@ -171,7 +171,7 @@ fn stdio_exclude_tools_removes_from_list_and_dispatch() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &["--exclude-tools", "capture"]);
     let tools = c.tools();
-    assert_eq!(tools.len(), 17);
+    assert_eq!(tools.len(), TOOLS.iter().filter(|t| t.toolset == "core").count() - 1);
     assert!(!tools.iter().any(|t| t["name"] == "capture"));
     let r = c.call("tools/call", json!({"name":"capture","arguments":{"target":"w1"}}));
     assert!(r.get("error").is_some() || r["result"]["isError"] == true, "{r}");
