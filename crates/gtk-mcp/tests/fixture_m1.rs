@@ -581,3 +581,65 @@ async fn diff_snapshots_reports_expander_child_changes() {
     let e = c.err("diff_snapshots", json!({"from": "snap-9999", "to": b["snapshot_id"]})).await;
     assert_eq!(e.code, ErrorCode::SnapshotUnavailable);
 }
+
+// gm-lhp: a secret buffer must not become readable by re-homing it onto a
+// plain entry via set_property(buffer=...).
+#[tokio::test(flavor = "multi_thread")]
+async fn secret_buffer_cannot_be_rehomed_to_plain_entry() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = rw(&fx);
+    let mut seen: Vec<String> = Vec::new();
+    macro_rules! rec {
+        ($tool:expr, $args:expr) => {{
+            let out = c.call($tool, $args).await;
+            let s = match &out {
+                Ok(o) => format!("{:?}", o.contents),
+                Err(e) => format!("{e:?}"),
+            };
+            seen.push(s);
+            out
+        }};
+    }
+    rec!("interact", json!({"target": by_id("password"), "operation": "fill", "text": SECRET})).unwrap();
+
+    let snap = rec!("snapshot", json!({"format": "json"})).unwrap().json_content().unwrap();
+    let pw_ref = node_by_name(&snap, "password")["ref"].as_str().unwrap().to_string();
+    let inner = find_node(node_by_name(&snap, "password"), &|n| n["type"] == "GtkText").unwrap()["ref"].as_str().unwrap().to_string();
+    let plain = node_by_name(&snap, "name-entry")["ref"].as_str().unwrap().to_string();
+    // Step 2 of the trigger: the secret buffer is reachable as an object ref.
+    let buf_out = rec!("get_property", json!({"target": inner, "names": ["buffer"]})).unwrap().json_content().unwrap();
+    let buf_ref = buf_out["values"]["buffer"]["ref"].as_str().expect("buffer ref").to_string();
+    let _ = pw_ref;
+
+    // Step 3: assigning the secret buffer onto a plain entry must be refused.
+    // If it ever lands (assignment not refused), fix (a) must instead make the
+    // plain entry secret, so every read below is redacted.
+    let assigned = match rec!("set_property", json!({"target": plain, "name": "buffer", "value": buf_ref})) {
+        Ok(_) => true,
+        Err(e) => {
+            assert_eq!(e.code, ErrorCode::Redacted, "secret buffer assignment must be refused as redacted: {e:?}");
+            false
+        }
+    };
+
+    if assigned {
+        // Step 4: the re-homed entry must behave as secret everywhere.
+        let out = rec!("get_property", json!({"target": plain.clone(), "names": ["text", "text-length"]})).unwrap().json_content().unwrap();
+        for (_, val) in out["values"].as_object().unwrap() {
+            assert_eq!(*val, json!({"redacted": true}), "plain entry with secret buffer must redact: {out}");
+        }
+        let e = rec!("inspect_text", json!({"target": plain.clone()})).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Redacted);
+        let e = rec!("capture", json!({"target": plain})).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Redacted);
+    }
+    rec!("snapshot", json!({"format": "json"})).unwrap();
+    let q = rec!("query", json!({"selector": {"text": SECRET}})).unwrap().json_content().unwrap();
+    assert_eq!(q["total"], 0);
+
+    for (i, s) in seen.iter().enumerate() {
+        assert!(!s.contains(SECRET), "response #{i} leaked the secret: {s}");
+        assert!(!s.contains("hunter2"), "response #{i} leaked part of the secret");
+    }
+}

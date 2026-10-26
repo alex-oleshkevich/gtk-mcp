@@ -84,18 +84,39 @@ fn propagate(obj: &glib::Object) {
     }
 }
 
+/// Does `obj` hold a secret buffer (Entry/Text `GtkEntryBuffer`, TextView
+/// `GtkTextBuffer`)? A widget displaying a secret buffer is secret even if
+/// the widget itself was never a secret root — e.g. an app (or, before the
+/// assignment refusal in `json_to_value`, the agent) re-homed the buffer of
+/// a password entry onto a plain entry.
+fn has_secret_buffer(obj: &glib::Object) -> bool {
+    let buffer: Option<glib::Object> = if let Some(e) = obj.dynamic_cast_ref::<gtk::Entry>() {
+        Some(e.buffer().upcast::<glib::Object>())
+    } else if let Some(t) = obj.dynamic_cast_ref::<gtk::Text>() {
+        Some(t.buffer().upcast::<glib::Object>())
+    } else {
+        obj.dynamic_cast_ref::<gtk::TextView>().map(|t| t.buffer().upcast::<glib::Object>())
+    };
+    buffer.is_some_and(|b| flag(&b) == Some(FLAG_SECRET))
+}
+
 /// Is `obj` in the secret set: a root, a descendant of a root, a root's
-/// editable delegate, or a root's buffer.
+/// editable delegate, a root's buffer, or a widget holding a secret buffer.
 pub fn is_secret(obj: &impl IsA<glib::Object>) -> bool {
     let obj = obj.upcast_ref::<glib::Object>();
     if flag(obj) == Some(FLAG_SECRET) {
+        return true;
+    }
+    if has_secret_buffer(obj) {
+        set_flag(obj, FLAG_SECRET);
+        propagate(obj);
         return true;
     }
     if let Some(w) = obj.dynamic_cast_ref::<gtk::Widget>() {
         let mut cur = Some(w.clone());
         while let Some(c) = cur {
             let co = c.upcast_ref::<glib::Object>();
-            if flag(co) == Some(FLAG_SECRET) || is_root_by_properties(co) {
+            if flag(co) == Some(FLAG_SECRET) || is_root_by_properties(co) || has_secret_buffer(co) {
                 set_flag(co, FLAG_SECRET);
                 propagate(co);
                 if co != obj {

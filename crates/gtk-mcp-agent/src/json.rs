@@ -197,7 +197,10 @@ fn enum_nick_matches(nick: &str, name: &str, wanted: &str) -> bool {
 }
 
 /// Convert `v` to a `GValue` for `pspec`, rejecting read-only and
-/// construct-only properties.
+/// construct-only properties. A secret object may not be assigned as a
+/// property value: re-homing e.g. a password entry's buffer onto a plain
+/// entry would expose the secret through the new owner (gm-lhp). The
+/// refusal is `Redacted`, and the message never echoes the offered value.
 pub fn json_to_value(agent: &Agent, pspec: &glib::ParamSpec, v: &Value) -> Result<glib::Value, AgentError> {
     let flags = pspec.flags();
     if !flags.contains(glib::ParamFlags::WRITABLE) {
@@ -212,7 +215,16 @@ pub fn json_to_value(agent: &Agent, pspec: &glib::ParamSpec, v: &Value) -> Resul
             format!("property '{}' of {} can only be set at construction", pspec.name(), pspec.owner_type().name()),
         ));
     }
-    json_to_value_unchecked(agent, pspec, v)
+    let val = json_to_value_unchecked(agent, pspec, v)?;
+    if let Some(obj) = object_of(&val) {
+        if secrecy::is_secret(&obj) {
+            return Err(AgentError::new(
+                ErrorCode::Redacted,
+                format!("property '{}' of {} cannot be assigned a secret object", pspec.name(), pspec.owner_type().name()),
+            ));
+        }
+    }
+    Ok(val)
 }
 
 /// Conversion without the writability checks (also used to normalize the
