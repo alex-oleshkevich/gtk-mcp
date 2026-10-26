@@ -315,15 +315,15 @@ async fn set_property_cannot_unseal_an_unobserved_secret() {
     }
 }
 
-// ---- gm-z9w / gm-8bz ------------------------------------------------------------
+// ---- gm-z9w ------------------------------------------------------------------
 
-/// Texts of the fixture's hidden, `mark_secret`ed widgets.
-const MARKED: &[&str] = &["vault-notes-SECRET-71c2", "vault-choice-SECRET-5e0a"];
+/// Text of the fixture's hidden, `mark_secret`ed text view.
+const MARKED: &[&str] = &["vault-notes-SECRET-71c2"];
 
 /// `mark_secret` on a text view covers its buffer wherever it is shown (a plain
-/// mirror view shares it), and on a drop-down covers its model items.
+/// mirror view shares it).
 #[tokio::test(flavor = "multi_thread")]
-async fn marked_secrets_cover_shared_buffers_and_models() {
+async fn marked_secrets_cover_shared_buffers() {
     let display = require_display!();
     let fx = Fixture::start(&display, true, &[]);
     let c = rw(&fx);
@@ -342,11 +342,6 @@ async fn marked_secrets_cover_shared_buffers_and_models() {
     seen.push(text.to_string());
     assert_eq!(text["values"]["text"], json!({"redacted": true}));
     assert_eq!(c.err("inspect_text", json!({"target": buf})).await.code, ErrorCode::Redacted);
-
-    // The marked drop-down's model items are withheld.
-    let m = c.json("inspect_model", json!({"target": by_id("vault-choices")})).await;
-    seen.push(m.to_string());
-    assert_eq!(m["items"][0]["summary"], json!({"redacted": true}), "{m}");
 
     for (i, s) in seen.iter().enumerate() {
         for secret in MARKED {

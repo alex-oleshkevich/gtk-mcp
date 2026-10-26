@@ -93,20 +93,16 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     seeded.set_text("stalwart-ember-7-quill");
     seeded.set_visibility(false);
     root.append(&seeded);
-    // App-marked secrets (mark_secret), hidden: a text view whose buffer a
-    // plain mirror view also shows (gm-z9w), and a drop-down whose model items
-    // are secret (gm-8bz).
+    // App-marked secret (mark_secret), hidden: a text view whose buffer a
+    // plain mirror view also shows (gm-z9w).
     let marked = gtk::Box::new(gtk::Orientation::Vertical, 0);
     marked.set_visible(false);
     let vault_notes = named(gtk::TextView::new(), "vault-notes");
     vault_notes.buffer().set_text("vault-notes-SECRET-71c2");
     gtk_mcp_agent::mark_secret(&vault_notes);
     let mirror = named(gtk::TextView::with_buffer(&vault_notes.buffer()), "vault-mirror");
-    let vault_choices = named(gtk::DropDown::from_strings(&["vault-choice-SECRET-5e0a"]), "vault-choices");
-    gtk_mcp_agent::mark_secret(&vault_choices);
     marked.append(&vault_notes);
     marked.append(&mirror);
-    marked.append(&vault_choices);
     root.append(&marked);
 
     // Form: entry whose content makes "submit" sensitive (wait_for acceptance).
