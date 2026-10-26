@@ -78,7 +78,7 @@ agent linked by glimpse binaries behind a Cargo feature, and 56 MCP tools.
 | Also present: `gtk_shortcut_action_activate`, `gtk_widget_class_query_action`, `pango_layout_is_ellipsized`, `gtk_label_get_layout`, `g_type_get_instance_count`, `gtk_widget_child_focus`, `g_application_get_is_busy`, `gtk_widget_observe_controllers`, `gdk_frame_clock_get_timings`, `g_resources_enumerate_children`, `gtk_window_get_toplevels` | measured (review, sys crates) |
 | rmcp latest stable 3.7.0 | measured (crates.io, updated 2026-10-22) |
 | Synchronous AT-SPI self-call from the app main thread would deadlock | assumed → avoided by design (AT-SPI in broker) |
-| A frame clock may stop ticking for hidden/occluded Wayland surfaces | assumed → spike S2 |
+| A frame clock may stop ticking for hidden/occluded Wayland surfaces | measured (spike S2, nested niri 26.04): `after-paint` after `queue_draw()` fires for visible-focused, fully covered, unfocused and off-workspace windows (6/6 within 1 s, 0.6–17 ms idle); an unmapped (`set_visible(false)`) window never paints (0/3). niri has no minimized state. Consecutive frames in a burst are ~0.98 s apart (frame-callback throttling), so a second capture right after a commit can miss a 1000 ms window |
 | GTK's accessible tree and its AT-SPI export can be joined by parallel structural walk | assumed → spike S3 |
 | `GtkEventControllerLegacy` in capture phase on each toplevel observes all input events for attribution | assumed → spike S4 |
 | A `glib::spawn_future_local` executor fed by an `async_channel` from a plain thread delivers requests queued before `RelmApp::run` (served once the loop starts, ~7 ms after the send in the spike), during `run`, and none are handled on the sending thread (every handler observed `on_main=true`) | measured (spike S1, `spikes/s1-executor`, relm4 0.11, 2026-10-26) |
@@ -116,9 +116,13 @@ fixture binary pattern; artifacts under `$XDG_DATA_HOME/gtk-mcp`.
 
 ### 4.2 Agent execution model
 
-- `attach` must be called on the main thread after `gtk::init`. If GTK is
-  initialized but gtk-rs is not (C/GI hosts), the agent checks
-  `gtk_is_initialized()` through FFI and calls `gtk::set_initialized()`.
+- `attach` must be called on the main thread after the application object
+  exists. GTK itself may not be initialized yet (plain gtk-rs initializes it
+  inside `GApplication::startup`, after `attach`); the executor therefore
+  checks before every request. If GTK is initialized but gtk-rs is not (C/GI
+  hosts), the agent checks `gtk_is_initialized()` through FFI and calls
+  `gtk::set_initialized()`; before GTK is initialized a request is answered
+  `unavailable`.
 - `attach` creates an `async_channel` and starts one long-lived
   `glib::spawn_future_local` executor loop on the default main context. The
   loop runs only while the main loop iterates; requests that arrive earlier
@@ -221,7 +225,8 @@ applies secrecy → optional `observe` (snapshot subtree and/or settled capture)
 
 Resolve target → `detached` / `target_unmapped` checks → if `settle` (default):
 await target native's frame clock `after-paint` that occurs after the request
-started, bounded by `settle_timeout_ms` (default 1000) → paintable of target →
+started (only when the widget has pending changes; a clean widget's last frame
+is already settled), bounded by `settle_timeout_ms` (default 2000, see 13) → paintable of target →
 render with the native's renderer → PNG. No paint before timeout: return the
 last frame with `stale: true, reason: "no_frame"`, or `capture_unavailable`
 when there has never been a frame. Animations are not awaited; callers use
@@ -681,6 +686,10 @@ Reviewer: `GtkMcpDocReview` (independent reviewer agent), 2026-10-26, over
 | M13 restart of external apps | broker-launched only |
 | M14 toolset mechanism | 4.5, 7.1 |
 | M15 detached vs stale | 4.3 |
+| S2: settle timeout and rule | `settle_timeout_ms` default raised 1000 → 2000 (throttled frames ~0.98 s apart). A clean widget is not re-drawn: GTK's last render node is already settled, so `stale` is false without waiting; with pending changes the next `after-paint` is awaited; none in time → last frame with `stale:true, stale_reason:"no_frame"` (`"settle_disabled"` when `settle:false`); never painted → `capture_unavailable`. Unmapped targets fail `target_unmapped` first. Known gap: a CSS restyle deferred to the next frame can be missed for a clean widget |
+| Spec correction: capture bounds/background | The PNG covers `compute_bounds(w, w)` (CSS margin box, may exceed `width()×height()`); it is flattened onto the theme window background rather than transparent. Tests use `result.width/height` |
+| Spec correction: attach vs `gtk::init` | `attach` runs before GTK is initialized in plain gtk-rs apps (4.2 reworded); executor guards per request |
+| Spec correction: batch/progress wire details | `$/progress {id,state:"started"}` marks dequeue (broker uses it to distinguish `target_unresponsive started:false` from `timeout started:true`); `BatchResult.cancelled`; `png_base64` appears next to `capture_id` and is stripped/retained by the broker, including inside `batch` and `observe`; `query` returns `target` when exactly one match; detached adapter content follows the real children |
 | Minors (full-view wording, accessible_id, socket path/bind time, class-action enabled, ellipsis scope, highlight class, focus walk side effects, diff ids, action refs, no-portals scope, instance count availability, example, glimpse-lock type, visibility scope, shortcut scopes) | applied across `tools.md`, `widget-tree.md`, `embedding.md`, and sections 4–7, 11 |
 
 Self-consistency pass (this plan): every type named in prose appears in
