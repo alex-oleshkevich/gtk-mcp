@@ -108,6 +108,10 @@ async fn observe_hook(
 
 pub async fn set_property(agent: &Rc<Agent>, p: SetPropertyParams, ctx: &Ctx) -> Result<Value, AgentError> {
     let obj = selector::resolve_object(agent, &p.target)?;
+    // Record secrecy while the object is still in its pre-mutation state:
+    // writing `visibility`/`input-purpose` first would let the later
+    // observation conclude "not secret" and unseal it permanently (gm-r54).
+    secrecy::is_secret(&obj);
     let ps = find_pspec(&obj, &p.name)?;
     let val = json_to_value(agent, &ps, &p.value)?;
     obj.set_property_from_value(ps.name(), &val);

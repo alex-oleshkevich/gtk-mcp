@@ -268,6 +268,53 @@ async fn secrets_never_leave_the_agent() {
     }
 }
 
+// ---- gm-r54 ------------------------------------------------------------------
+
+/// The fixture's "seeded-pass" entry has app-side text and visibility=false,
+/// and this test never observes it before mutating: the selector only uses
+/// type/automation_id keys, which never evaluate secrecy (plan 4.4). Flipping
+/// `visibility` via set_property must not un-mark the entry secret, or the
+/// plaintext would leak through every later read.
+const SEEDED: &str = "stalwart-ember-7-quill";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_property_cannot_unseal_an_unobserved_secret() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = rw(&fx);
+    let target = json!({"type_name": "GtkEntry", "automation_id": "seeded-pass"});
+    let mut seen: Vec<String> = Vec::new();
+
+    // Flip visibility before any observation of the entry (gm-r54 trigger).
+    let r = c.call("set_property", json!({"target": target, "name": "visibility", "value": true})).await;
+    seen.push(format!("{r:?}"));
+    let r = r.unwrap().json_content().unwrap();
+    assert_eq!(r["observed"], true);
+
+    // The entry is still secret: reads are redacted, not plaintext.
+    let out = c.call("get_property", json!({"target": target, "names": ["text", "text-length"]})).await;
+    seen.push(format!("{out:?}"));
+    let out = out.unwrap().json_content().unwrap();
+    assert_eq!(out["values"]["text"], json!({"redacted": true}));
+    assert_eq!(out["values"]["text-length"], json!({"redacted": true}));
+
+    // Snapshot withholds the text as well.
+    let snap = c.call("snapshot", json!({"format": "json"})).await;
+    seen.push(format!("{snap:?}"));
+    let snap = snap.unwrap().json_content().unwrap();
+    let node = node_by_name(&snap, "seeded-pass");
+    assert_eq!(node["secret"], true);
+    assert!(node.get("text").is_none(), "{node}");
+
+    // inspect_text refuses like for any other secret.
+    let e = c.err("inspect_text", json!({"target": target})).await;
+    assert_eq!(e.code, ErrorCode::Redacted);
+
+    for (i, s) in seen.iter().enumerate() {
+        assert!(!s.contains(SEEDED), "response #{i} leaked the seeded secret: {s}");
+    }
+}
+
 // ---- AC-8 --------------------------------------------------------------------
 
 fn short_deadline_broker(fx: &Fixture, ms: u64) -> Arc<Broker> {
