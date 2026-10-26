@@ -3,6 +3,7 @@
 //! tests can drive [`Broker::call_tool`] directly.
 
 pub mod broker;
+pub mod diagnostics;
 pub mod diff;
 pub mod launch;
 pub mod lifecycle;

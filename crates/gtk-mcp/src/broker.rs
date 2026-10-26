@@ -9,7 +9,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use gtk_mcp_protocol::{
     AgentError, BatchParams, DiffCapturesParams, DiffSnapshotsParams, ErrorCode, SessionInfo, SessionState,
-    SnapshotFormat, SnapshotParams, ToolSpec, WaitForParams, CaptureParams, parse_params, snapshot, tool_spec,
+    SnapshotFormat, SnapshotParams, ToolSpec, WaitForParams, MeasureFramesParams, DEFAULT_FRAME_WINDOW_MS, MAX_FRAME_WINDOW_MS, CaptureParams, parse_params, snapshot, tool_spec,
     validate_step,
 };
 use serde_json::{Map, Value};
@@ -283,6 +283,14 @@ impl Broker {
         match name {
             "diff_snapshots" => return self.diff_snapshots(&session, args),
             "diff_captures" => return self.diff_captures(&session, args),
+            "read_events" => {
+                let p = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
+                return crate::diagnostics::read_events(&session, p);
+            }
+            "read_logs" => {
+                let p = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
+                return crate::diagnostics::read_logs(&session, p);
+            }
             _ => {}
         }
         if let Some(e) = session.unavailable() {
@@ -344,6 +352,10 @@ impl Broker {
                 t.unwrap_or(1000) + 5000
             }
             "batch" => 60_000,
+            "measure_frames" => {
+                let t = serde_json::from_value::<MeasureFramesParams>(args.clone()).ok().and_then(|p| p.duration_ms);
+                t.unwrap_or(DEFAULT_FRAME_WINDOW_MS).min(MAX_FRAME_WINDOW_MS) + 5000
+            }
             _ => self.config.default_deadline_ms,
         }
     }

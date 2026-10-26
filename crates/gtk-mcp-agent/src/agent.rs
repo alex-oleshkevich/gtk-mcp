@@ -68,6 +68,8 @@ impl Agent {
     pub fn cleanup(&self) {
         tools::style::release_all();
         tools::settings::release_all();
+        tools::watch::release_all();
+        tools::record::release_all();
         if let Some(s) = self.socket.borrow_mut().take() {
             s.cleanup();
         }
@@ -88,6 +90,9 @@ impl Agent {
         // and recordings) is released here.
         tools::style::release_conn(conn);
         tools::settings::release_conn(conn);
+        tools::watch::release_conn(conn);
+        tools::record::release_conn(conn);
+        crate::logs::unregister_conn(conn);
     }
 
     pub fn hello_ack(&self) -> HelloAck {
@@ -101,6 +106,9 @@ impl Agent {
         }
         if sym_present(c"gtk_accessible_get_accessible_id") {
             caps.push(Capability::AccessibleId);
+        }
+        if crate::logs::used() {
+            caps.push(Capability::LogForwarding);
         }
         if self.config.instance_count {
             caps.push(Capability::InstanceCount);
@@ -218,6 +226,7 @@ async fn handle(agent: Rc<Agent>, req: Req) {
         started: Instant::now(),
     };
     if req.method == method::HELLO {
+        crate::logs::register_conn(&req.conn);
         let res = match serde_json::from_value::<Hello>(req.params.clone()) {
             Ok(_) => Ok(serde_json::to_value(agent.hello_ack()).expect("HelloAck serializes")),
             Err(e) => Err(AgentError::invalid_params(format!("invalid hello: {e}"))),
@@ -238,7 +247,7 @@ async fn handle(agent: Rc<Agent>, req: Req) {
         o.remove("_meta");
     }
     let mutating = tool_spec(&req.method).is_some_and(|s| s.mutating);
-    let result = run_tool(&agent, &req.method, params, &ctx).await;
+    let result = crate::diag::Busy(run_tool(&agent, &req.method, params, &ctx)).await;
     if ctx.is_cancelled() {
         // The broker has already answered this call. A mutation that did run is
         // reported as a late result so it is recorded, never retried.

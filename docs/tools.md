@@ -122,6 +122,56 @@ refs; without it, AT-SPI fields are reported unavailable.
 | `record` | R | Start recording interactions (input-attributed emission hooks, `plan.md` 5.6) |
 | `stop_recording` | R | Return a replayable `batch` script with selectors and secret placeholders; app-originated emissions listed separately |
 
+As built (M5):
+
+- `watch` takes `target` plus `kind`: `notify` (`properties`, default every
+  property; `GObject::notify` is not hookable, so this uses
+  `connect_notify_local`), `signal` (`signal`; a shared emission hook filtered
+  to the target; `notify` and `G_SIGNAL_NO_HOOKS` signals are refused) or
+  `model` (`items-changed`, plus `selection-changed` for selection models; the
+  target is a model or a widget with a `model` property). It returns a
+  `subscription` id. Subscriptions belong to the connection and disappear on
+  disconnect; at most 256. The AT-SPI event source is M6 (`gm-xae.6`).
+- Events are `$/event` notifications kept in the session's bounded ring:
+  `{kind: notify|signal|items_changed|selection_changed, subscription, target,
+  type, property|signal|position…, value|args, time_ms, by_agent}`. Events of
+  secret objects have no `value`/`args`, only `secret: true` and the name.
+  `by_agent` is true when the agent's own request caused the change.
+  `read_events {since, limit, subscription, kind}` returns
+  `{entries[{cursor,…}], next_cursor, more, dropped, dropped_total}`;
+  `late_result` records appear as `kind: late_result`. It works on exited
+  sessions.
+- `read_logs {since, limit, min_level, contains, source}` reads the session's
+  log ring: stdout/stderr lines of broker-launched apps (GLib default-writer
+  lines are parsed into `level`, `domain`, `message`) and `source: forwarded`
+  records from `gtk_mcp_agent::forward_log(level, fields)` (`level`, `domain`,
+  `message`, `fields`). `unavailable` for an external app that never forwarded
+  and does not advertise `LogForwarding`; the session counts as forwarding once
+  it advertised the capability (a `forward_log` call before the handshake) or
+  sent a `$/log` record. Records forwarded while no broker is connected are
+  kept (512) and delivered at the handshake. `min_level` drops lines without a
+  severity.
+- `measure_frames {target, duration_ms}` (default 1000, max 10000) connects to
+  the target's frame clock (default: active window) for the window and reports
+  frames, fps, interval statistics (min/avg/p95/p99/max), `missed_frames`
+  (interval above 1.5× refresh), long frames and per-frame timings (first
+  120). Presentation times come from the clock history when the compositor
+  reported them (`presentation.available`). An idle surface reports
+  `frames: 0, idle: true`.
+- `record` / `stop_recording`: one recording per app, owned by the connection
+  that started it. Controllers go on every toplevel and popover (spike S4:
+  popovers are separate natives) and on windows/popovers mapped later (a hook on
+  `GtkWidget::map`). Menu-button popover toggles are recorded as
+  `popup`/`popdown` on the menu button. `stop_recording` returns
+  `{batch: {steps, stop_on_error}, steps, app_emissions, secrets,
+  human_emissions, ignored_agent_emissions, dropped_events, duration_ms}`.
+  Consecutive `fill`/`set_value`/`set_*` steps on the same widget are merged;
+  `GSimpleAction::activate`/`change-state` become `activate_action` /
+  `change_action_state` with `win.`/`app.` names (an action in an unregistered
+  group is skipped; a `change-state` right after the `activate` of the same
+  action is its consequence and dropped). The 300 ms human window is a
+  heuristic: an app emission right after real input is reported as `human`.
+
 ## app
 
 | Tool | | Purpose |

@@ -21,6 +21,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 mod actions;
+mod diagnostics;
 
 #[derive(Clone)]
 pub struct Server {
@@ -30,7 +31,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(broker: Arc<Broker>) -> Result<Self, String> {
-        let mut router = Self::tool_router() + Self::tool_router_actions();
+        let mut router = Self::tool_router() + Self::tool_router_actions() + Self::tool_router_diagnostics();
         let registered: Vec<String> = router.list_all().iter().map(|t| t.name.to_string()).collect();
         for t in TOOLS {
             if !registered.iter().any(|n| n == t.name) {

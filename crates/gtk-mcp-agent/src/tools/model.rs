@@ -28,7 +28,7 @@ fn model_of_property(obj: &glib::Object, name: &str) -> Option<gio::ListModel> {
     object_of(&obj.property_value(name))?.downcast::<gio::ListModel>().ok()
 }
 
-fn resolve_model(obj: &glib::Object) -> Result<gio::ListModel, AgentError> {
+pub(crate) fn resolve_model(obj: &glib::Object) -> Result<gio::ListModel, AgentError> {
     if let Some(m) = obj.dynamic_cast_ref::<gio::ListModel>() {
         return Ok(m.clone());
     }
