@@ -84,6 +84,13 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     plist.add_css_class("boxed-list");
     plist.append(&prow);
     root.append(&plist);
+    // App-seeded secret (gm-r54): the text is placed by the app, never through
+    // the agent, so `visibility` can be flipped before the entry is ever
+    // observed. A plain GtkEntry (not PasswordEntry) with visibility=false.
+    let seeded = named(gtk::Entry::new(), "seeded-pass");
+    seeded.set_text("stalwart-ember-7-quill");
+    seeded.set_visibility(false);
+    root.append(&seeded);
 
     // Form: entry whose content makes "submit" sensitive (wait_for acceptance).
     let name_entry = named(gtk::Entry::new(), "name-entry");
