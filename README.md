@@ -57,6 +57,38 @@ instrumented. Optional API (all no-ops when the agent is inactive):
 Stable selectors need no dependency: `widget.set_widget_name("panel-clock")`
 is the `automation_id`.
 
+## Other languages (C, Python, GJS)
+
+`crates/gtk-mcp-agent-capi` builds `libgtk_mcp_agent_capi.so` (`cargo build -p
+gtk-mcp-agent-capi`), with a header (`include/gtk-mcp-agent.h`) and a
+GObject-introspection description (`GtkMcp-1.gir`, compiled with
+`g-ir-compiler --shared-library=libgtk_mcp_agent_capi.so` to `GtkMcp-1.typelib`).
+The library links the host's `libgtk-4` dynamically (no second GTK) and never
+links libadwaita or gtk4-layer-shell. Same `GTK_MCP=1` gating and socket
+contract as the Rust crate; call everything on the main thread.
+
+```c
+#include <gtk-mcp-agent.h>
+gtk_mcp_agent_attach (app);              /* before g_application_run() */
+```
+
+```python
+gi.require_version('GtkMcp', '1'); from gi.repository import GtkMcp
+GtkMcp.attach(app)                       # GI_TYPELIB_PATH / LD_LIBRARY_PATH -> build dir
+```
+
+```js
+import GtkMcp from 'gi://GtkMcp';
+GtkMcp.attach(app);
+```
+
+Also exported: `mark_secret(GObject)`, `register_action_group(widget, prefix,
+group)`, `register_settings(GSettings)` and `register_state(name, callback)`
+(the callback returns a JSON string; C signature `char *(*)(gpointer)` plus
+`user_data`/`GDestroyNotify`). There is no log-forwarding API (the Rust agent
+has none). Working apps: `crates/gtk-mcp-agent-capi/smoke/` (`smoke.c`,
+`smoke.py`, `smoke.js`), exercised by `tests/fixture_m7.rs`.
+
 ## Policy flags (broker)
 
 | Flag | Meaning |

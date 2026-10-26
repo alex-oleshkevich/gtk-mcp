@@ -7,12 +7,12 @@ members = [
     "crates/gtk-mcp-fixture",
     "crates/gtk-mcp-agent-capi",
 ]
-# The C ABI crate is a placeholder until M7.
 default-members = [
     "crates/gtk-mcp-protocol",
     "crates/gtk-mcp-agent",
     "crates/gtk-mcp",
     "crates/gtk-mcp-fixture",
+    "crates/gtk-mcp-agent-capi",
 ]
 exclude = ["spikes"]
 

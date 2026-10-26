@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<!-- Hand-written GIR for the gtk-mcp agent C API (include/gtk-mcp-agent.h).
+     Compile: g-ir-compiler (shared library libgtk_mcp_agent_capi.so) GtkMcp-1.gir to GtkMcp-1.typelib -->
+<repository version="1.2"
+            xmlns="http://www.gtk.org/introspection/core/1.0"
+            xmlns:c="http://www.gtk.org/introspection/c/1.0"
+            xmlns:glib="http://www.gtk.org/introspection/glib/1.0">
+  <include name="Gtk" version="4.0"/>
+  <include name="Gio" version="2.0"/>
+  <include name="GObject" version="2.0"/>
+  <c:include name="gtk-mcp-agent.h"/>
+  <namespace name="GtkMcp" version="1" shared-library="libgtk_mcp_agent_capi.so"
+             c:identifier-prefixes="GtkMcp" c:symbol-prefixes="gtk_mcp">
+    <callback name="StateFunc" c:type="GtkMcpStateFunc">
+      <doc xml:space="preserve">Returns the app state as a JSON document.</doc>
+      <return-value transfer-ownership="full" nullable="1">
+        <doc xml:space="preserve">a newly allocated JSON document, or %NULL for JSON null</doc>
+        <type name="utf8" c:type="char*"/>
+      </return-value>
+      <parameters>
+        <parameter name="user_data" transfer-ownership="none" closure="0">
+          <type name="gpointer" c:type="gpointer"/>
+        </parameter>
+      </parameters>
+    </callback>
+    <function name="attach" c:identifier="gtk_mcp_agent_attach">
+      <doc xml:space="preserve">Attach the agent to @app. Inert unless GTK_MCP=1.</doc>
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="app" transfer-ownership="none">
+          <type name="Gtk.Application" c:type="GtkApplication*"/>
+        </parameter>
+      </parameters>
+    </function>
+    <function name="mark_secret" c:identifier="gtk_mcp_agent_mark_secret">
+      <doc xml:space="preserve">Mark @object as secret: its values are never returned.</doc>
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="object" transfer-ownership="none">
+          <type name="GObject.Object" c:type="GObject*"/>
+        </parameter>
+      </parameters>
+    </function>
+    <function name="register_action_group" c:identifier="gtk_mcp_agent_register_action_group">
+      <doc xml:space="preserve">Make the group inserted on @widget under @prefix visible to the agent.</doc>
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="widget" transfer-ownership="none">
+          <type name="Gtk.Widget" c:type="GtkWidget*"/>
+        </parameter>
+        <parameter name="prefix" transfer-ownership="none">
+          <type name="utf8" c:type="const char*"/>
+        </parameter>
+        <parameter name="group" transfer-ownership="none">
+          <type name="Gio.ActionGroup" c:type="GActionGroup*"/>
+        </parameter>
+      </parameters>
+    </function>
+    <function name="register_settings" c:identifier="gtk_mcp_agent_register_settings">
+      <doc xml:space="preserve">Tell the agent about a GSettings object the application uses.</doc>
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="settings" transfer-ownership="none">
+          <type name="Gio.Settings" c:type="GSettings*"/>
+        </parameter>
+      </parameters>
+    </function>
+    <function name="register_state" c:identifier="gtk_mcp_agent_register_state">
+      <doc xml:space="preserve">Expose the JSON returned by @callback as the resource app-state/@name.</doc>
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="name" transfer-ownership="none">
+          <type name="utf8" c:type="const char*"/>
+        </parameter>
+        <parameter name="callback" transfer-ownership="none" scope="notified" closure="2" destroy="3">
+          <type name="StateFunc" c:type="GtkMcpStateFunc"/>
+        </parameter>
+        <parameter name="user_data" transfer-ownership="none" closure="1" skip="1">
+          <type name="gpointer" c:type="gpointer"/>
+        </parameter>
+        <parameter name="destroy" transfer-ownership="none" scope="async" skip="1">
+          <type name="GLib.DestroyNotify" c:type="GDestroyNotify"/>
+        </parameter>
+      </parameters>
+    </function>
+  </namespace>
+</repository>

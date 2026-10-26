@@ -897,6 +897,13 @@ dependencies = [
 [[package]]
 name = "gtk-mcp-agent-capi"
 version = "0.1.0"
+dependencies = [
+ "gio",
+ "glib",
+ "gtk-mcp-agent",
+ "gtk4",
+ "serde_json",
+]
 
 [[package]]
 name = "gtk-mcp-fixture"
