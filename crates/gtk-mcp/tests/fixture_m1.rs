@@ -315,17 +315,23 @@ async fn set_property_cannot_unseal_an_unobserved_secret() {
     }
 }
 
-/// gm-ef6: the `last_frame` fallback must never serve a frame painted while a
-/// secret field was peeking. Sequence: capture the window (its paintable is
-/// remembered and keeps following paints), peek (plaintext paints), un-peek
-/// (visibility=false again, so `check_target` passes), then capture before
-/// the next paint. Both fallback paths (`settle:false` on a dirty widget and
-/// `settle:true` timing out with no frame) must fail `capture_unavailable`
-/// instead of returning the remembered peeking frame; a later settled
-/// capture succeeds with a fresh (bulleted) frame. The captures are issued
-/// immediately after un-peeking, well inside one compositor frame interval
-/// (spike S2: ~1 s under nested-niri throttling), so the widget is still
-/// dirty and the fallback is the path under test.
+/// gm-ef6 / gm-yie: the `last_frame` fallback must never serve a frame painted
+/// while a secret field was peeking. Sequence: capture the window (its
+/// paintable is remembered and keeps following paints), peek (plaintext
+/// paints), un-peek (visibility=false again, so `check_target` passes), then
+/// capture immediately. If the widget is still dirty, both fallback paths
+/// (`settle:false`, and `settle:true` timing out with no frame) must fail
+/// `capture_unavailable` instead of returning the remembered peeking frame.
+///
+/// Whether the widget is still dirty at that instant is not deterministic:
+/// the compositor may paint the fresh (bulleted) frame before the capture
+/// request is processed — under the post-M5/M6 fixture it reliably does
+/// (gm-yie: the capture arrives with a current render node and bulleted
+/// pixels). That success is legitimate, so a successful capture is accepted
+/// only with pixel proof: the password entry's region must match a fresh
+/// settled capture of the same (un-peeked) window. A served peeking frame
+/// would show the plaintext glyphs and differ in that region; a refused
+/// capture needs no proof. Either way the peeking frame is never served.
 #[tokio::test(flavor = "multi_thread")]
 async fn capture_after_peek_off_never_serves_the_peeking_frame() {
     let display = require_display!();
@@ -333,6 +339,8 @@ async fn capture_after_peek_off_never_serves_the_peeking_frame() {
     let c = rw(&fx);
     c.json("interact", json!({"target": by_id("password"), "operation": "fill", "text": SECRET})).await;
     let win = c.json("list_windows", json!({})).await["windows"][0]["ref"].clone();
+    let snap = c.snapshot_json(json!({})).await;
+    let pw_ref = node_by_name(&snap, "password")["ref"].as_str().unwrap().to_string();
     // Remember the window's paintable via a normal settled capture.
     c.call("capture", json!({"target": win})).await.unwrap();
 
@@ -346,13 +354,52 @@ async fn capture_after_peek_off_never_serves_the_peeking_frame() {
         tokio::time::sleep(Duration::from_millis(1600)).await;
         let e = c.err("capture", json!({"target": win})).await;
         assert_eq!(e.code, ErrorCode::Redacted, "capture while peeking must stay refused");
-        // Un-peek: visibility=false, widget dirty, no fresh paint yet.
+        // Un-peek: visibility=false again. The widget is dirty until the
+        // compositor paints the bulleted text; which side of that paint the
+        // capture lands on is a race, so accept either safe outcome.
         c.json("interact", json!({"target": by_id("peek-toggle"), "operation": "set_active", "active": false})).await;
-        let e = c.err("capture", args.clone()).await;
-        assert_eq!(e.code, ErrorCode::CaptureUnavailable, "capture {args} after peek-off must not serve the peeking frame: {e:?}");
-        // A settled capture still succeeds once a fresh frame paints.
-        let ok = c.call("capture", json!({"target": win})).await.unwrap();
-        assert_eq!(ok.json_content().unwrap()["stale"], false);
+        let candidate = match c.call("capture", args.clone()).await {
+            Err(e) => {
+                // Still dirty: the fallback must refuse the peeking frame.
+                assert_eq!(e.code, ErrorCode::CaptureUnavailable, "capture {args} after peek-off must not serve the peeking frame: {e:?}");
+                // A settled capture still succeeds once a fresh frame paints.
+                let ok = c.call("capture", json!({"target": win})).await.unwrap();
+                assert_eq!(ok.json_content().unwrap()["stale"], false);
+                continue;
+            }
+            Ok(ok) => ok,
+        };
+
+        // Already repainted: prove the served pixels are the bulleted text,
+        // not the plaintext painted while peeking, by comparing the password
+        // entry's region against a fresh settled capture.
+        let cand_png = decode_png(candidate.images()[0]);
+        let fresh = c.call("capture", json!({"target": win})).await.unwrap();
+        let fresh_meta = fresh.json_content().unwrap();
+        assert_eq!(fresh_meta["stale"], false, "{fresh_meta}");
+        let fresh_png = decode_png(fresh.images()[0]);
+        assert_eq!((cand_png.width(), cand_png.height()), (fresh_png.width(), fresh_png.height()), "window size changed between the peek-off capture and the settled capture");
+        // Bounds come from a separate annotated capture: the overlay is drawn
+        // into that capture's own pixels, so it cannot be the compared frame.
+        let annotated = c.json("capture", json!({"target": win, "annotate": true})).await;
+        let ann = annotated["annotations"].as_array().unwrap().iter().find(|a| a["ref"] == pw_ref).expect("password entry must be annotated");
+        let (x0, y0) = (ann["x"].as_f64().unwrap() as u32, ann["y"].as_f64().unwrap() as u32);
+        let (x1, y1) = (x0 + ann["width"].as_f64().unwrap() as u32, y0 + ann["height"].as_f64().unwrap() as u32);
+        let (mut diff, mut area) = (0u64, 0u64);
+        for y in y0.min(cand_png.height())..y1.min(cand_png.height()) {
+            for x in x0.min(cand_png.width())..x1.min(cand_png.width()) {
+                area += 1;
+                let (a, b) = (cand_png.get_pixel(x, y).0, fresh_png.get_pixel(x, y).0);
+                if (0..3).any(|i| a[i].abs_diff(b[i]) > 16) {
+                    diff += 1;
+                }
+            }
+        }
+        assert!(area > 0, "password entry region must lie inside the capture");
+
+        let frac = diff as f64 / area as f64;
+
+        assert!(frac < 0.01, "capture {args} after peek-off differs from a fresh bulleted capture in {frac:.4} of the password region ({diff}/{area}px): it may have served the peeking frame");
     }
 }
 
