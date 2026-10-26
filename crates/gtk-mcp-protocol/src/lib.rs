@@ -9,6 +9,7 @@ pub mod tools_m3;
 pub mod tools_m2;
 pub mod tools_m4;
 pub mod tools_m5;
+pub mod tools_m6;
 pub mod types;
 
 pub use rpc::*;
@@ -17,4 +18,5 @@ pub use tools_m3::*;
 pub use tools_m2::*;
 pub use tools_m4::*;
 pub use tools_m5::*;
+pub use tools_m6::*;
 pub use types::*;

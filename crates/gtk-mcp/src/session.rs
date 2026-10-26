@@ -287,6 +287,11 @@ impl Session {
     pub fn logs_since(&self, cursor: u64) -> Read {
         lock(&self.logs).since(cursor)
     }
+    /// Append a record to the session's event ring (broker-side event sources).
+    pub fn push_event(&self, value: Value) -> u64 {
+        lock(&self.inner).events.push(value)
+    }
+
     pub(crate) fn exit_seq(&self) -> u64 {
         self.exit_seq.load(Ordering::Acquire)
     }

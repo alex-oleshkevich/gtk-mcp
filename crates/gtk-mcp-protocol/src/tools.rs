@@ -8,6 +8,7 @@
 use crate::tools_m2::*;
 use crate::tools_m4::*;
 use crate::tools_m5::*;
+use crate::tools_m6::*;
 use crate::types::*;
 use crate::tools_m3::*;
 use schemars::JsonSchema;
@@ -342,6 +343,11 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "measure_frames", toolset: "diagnostics", mutating: false, agent: true },
     ToolSpec { name: "record", toolset: "diagnostics", mutating: false, agent: true },
     ToolSpec { name: "stop_recording", toolset: "diagnostics", mutating: false, agent: true },
+    // a11y (M6): the agent answers the GTK side; the broker joins AT-SPI onto it.
+    ToolSpec { name: "accessible_tree", toolset: "a11y", mutating: false, agent: true },
+    ToolSpec { name: "inspect_accessible", toolset: "a11y", mutating: false, agent: true },
+    ToolSpec { name: "audit_accessibility", toolset: "a11y", mutating: false, agent: false },
+    ToolSpec { name: "trace_focus_order", toolset: "a11y", mutating: true, agent: true },
 ];
 
 pub fn tool_spec(name: &str) -> Option<&'static ToolSpec> {
@@ -431,6 +437,10 @@ pub fn parse_params(tool: &str, args: Value) -> Result<(), String> {
         "measure_frames" => chk!(MeasureFramesParams),
         "record" => chk!(RecordParams),
         "stop_recording" => chk!(StopRecordingParams),
+        "accessible_tree" => chk!(AccessibleTreeParams),
+        "inspect_accessible" => chk!(InspectAccessibleParams),
+        "audit_accessibility" => chk!(AuditAccessibilityParams),
+        "trace_focus_order" => chk!(TraceFocusOrderParams),
         other => Err(format!("unknown tool '{other}'")),
     }
 }

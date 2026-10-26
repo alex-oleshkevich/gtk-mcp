@@ -67,6 +67,10 @@ pub struct Broker {
     next_session: AtomicU64,
     exit_counter: Arc<AtomicU64>,
     scan_lock: Mutex<()>,
+    /// Shared AT-SPI connection (`--allow-atspi`), created on first use.
+    pub(crate) atspi: tokio::sync::Mutex<Option<crate::a11y::atspi::Atspi>>,
+    /// Running AT-SPI event forwarders by session id.
+    pub(crate) atspi_watches: Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -99,6 +103,8 @@ impl Broker {
             next_session: AtomicU64::new(1),
             exit_counter: Arc::new(AtomicU64::new(0)),
             scan_lock: Mutex::new(()),
+            atspi: tokio::sync::Mutex::new(None),
+            atspi_watches: Mutex::new(Default::default()),
         }))
     }
 
@@ -311,6 +317,11 @@ impl Broker {
             }
         }
 
+        if matches!(name, "accessible_tree" | "inspect_accessible" | "audit_accessibility") {
+            args.as_object_mut().unwrap().insert("session".into(), Value::String(session.id().to_owned()));
+            return self.a11y(name, &session, args, progress).await;
+        }
+
         let deadline_ms = self.deadline_ms(name, &args);
         args.as_object_mut().unwrap().insert("session".into(), Value::String(session.id().to_owned()));
         let result = session.request(name, args.clone(), deadline_ms, progress).await?;
@@ -431,6 +442,9 @@ impl Broker {
 
 impl Drop for Broker {
     fn drop(&mut self) {
+        for (_, h) in lock(&self.atspi_watches).drain() {
+            h.abort();
+        }
         self.shutdown();
     }
 }

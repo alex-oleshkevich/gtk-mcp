@@ -865,6 +865,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "futures-util",
  "gtk-mcp-protocol",
  "image",
  "libc",

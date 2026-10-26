@@ -231,6 +231,9 @@ pub struct Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("fixture stderr at failure:\n{}", self.stderr());
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

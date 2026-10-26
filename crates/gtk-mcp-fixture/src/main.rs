@@ -7,6 +7,7 @@ use gtk4 as gtk;
 use libadwaita as adw;
 
 mod m3;
+mod m6;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -243,6 +244,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     m3::extras(&root);
     m4::extras(&root, app);
     m5::extras(&root);
+    m6::extras(&root);
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&root));
     scroll.set_vexpand(true);
