@@ -472,6 +472,18 @@ pub fn object_stats(agent: &Rc<Agent>, p: ObjectStatsParams) -> Result<Value, Ag
             "instance counts are off: the app must start with GOBJECT_DEBUG=instance-count (launch_app preset `instance_count`)",
         ));
     }
+    // GOBJECT_DEBUG was set, but GLib only counts when it was built with debugging
+    // support: probe with a live object instead of trusting the environment.
+    let probe = glib::Object::new::<glib::Object>();
+    // SAFETY: plain query of a registered GType.
+    let probed = unsafe { glib::gobject_ffi::g_type_get_instance_count(glib::Object::static_type().into_glib()) };
+    drop(probe);
+    if probed < 1 {
+        return Err(err(
+            ErrorCode::Unavailable,
+            "GOBJECT_DEBUG=instance-count is set but this GLib does not count instances (built without debug support)",
+        ));
+    }
     let min = p.min_count.unwrap_or(1).max(1) as i64;
     let limit = p.limit.unwrap_or(200).clamp(1, 5000) as usize;
     let mut types = Vec::new();

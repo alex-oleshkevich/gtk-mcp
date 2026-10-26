@@ -36,6 +36,55 @@ fn die_with_parent(cmd: &mut Command) {
     }
 }
 
+/// Host-niri IPC helpers: keep the nested compositor's window off the output the
+/// user is working on. Never focuses or raises anything on that output.
+mod placement {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    fn host(args: &[&str]) -> Option<serde_json::Value> {
+        let out = Command::new("niri").arg("msg").arg("--json").args(args).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        serde_json::from_slice(&out.stdout).ok()
+    }
+
+    pub struct Before {
+        focused_window: Option<u64>,
+        work_output: Option<String>,
+    }
+
+    pub fn before() -> Option<Before> {
+        std::env::var_os("NIRI_SOCKET")?;
+        let focused = host(&["focused-window"]);
+        let focused_window = focused.as_ref().and_then(|w| w["id"].as_u64());
+        let work_output = host(&["focused-output"]).and_then(|o| o["name"].as_str().map(String::from));
+        Some(Before { focused_window, work_output })
+    }
+
+    /// Move the nested compositor's window (host app_id `niri`, owned by `pid`)
+    /// to a different output than the one in use, then restore the focus.
+    pub fn move_away(b: &Before, pid: u32) {
+        let target = std::env::var("GTK_MCP_TEST_NESTED_OUTPUT").ok();
+        let _ = &b.work_output;
+        let Some(target) = target else { return };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let wins = host(&["windows"]).unwrap_or_default();
+            if let Some(w) = wins.as_array().into_iter().flatten().find(|w| w["pid"].as_u64() == Some(u64::from(pid))) {
+                let id = w["id"].as_u64().unwrap().to_string();
+                let _ = Command::new("niri").args(["msg", "action", "move-window-to-monitor", "--id", &id, &target]).status();
+                if let Some(prev) = b.focused_window {
+                    let _ = Command::new("niri").args(["msg", "action", "focus-window", "--id", &prev.to_string()]).status();
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 fn start_nested_niri() -> Result<Display, String> {
     let host = std::env::var("WAYLAND_DISPLAY").map_err(|_| "no host WAYLAND_DISPLAY for a nested niri".to_string())?;
     let host_rt = std::env::var("XDG_RUNTIME_DIR").map_err(|_| "no XDG_RUNTIME_DIR".to_string())?;
@@ -54,6 +103,10 @@ fn start_nested_niri() -> Result<Display, String> {
     std::fs::write(&cfg, "output \"winit\" {\n    mode \"1280x800@60\"\n    scale 1\n}\n").map_err(|e| e.to_string())?;
     let log = std::fs::File::create(root.join("niri.log")).map_err(|e| e.to_string())?;
     let log2 = log.try_clone().map_err(|e| e.to_string())?;
+    if std::env::var_os("NIRI_SOCKET").is_some() && std::env::var_os("GTK_MCP_TEST_NESTED_OUTPUT").is_none() {
+        return Err("host niri detected: set GTK_MCP_TEST_NESTED_OUTPUT=<output name> so the nested compositor window is placed off your working output".into());
+    }
+    let before = placement::before();
     let mut cmd = Command::new("niri");
     cmd.env("XDG_RUNTIME_DIR", &runtime)
         .env("WAYLAND_DISPLAY", &host_socket)
@@ -96,6 +149,11 @@ fn start_nested_niri() -> Result<Display, String> {
                 std::thread::sleep(Duration::from_millis(100));
             };
             let ok = res.is_ok();
+            if ok {
+                if let Some(b) = &before {
+                    placement::move_away(b, child.id());
+                }
+            }
             let _ = tx.send(res);
             if ok {
                 let _ = child.wait(); // keeps this thread (the PDEATHSIG parent) alive
@@ -144,7 +202,7 @@ pub fn note_skip(what: &str) {
     SKIP_NOTE.get_or_init(|| eprintln!("SKIPPED ({what}): no Wayland display available"));
 }
 
-fn fixture_binary() -> PathBuf {
+pub fn fixture_binary() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     // target/<profile>/deps/<test> -> target/<profile>
     let profile_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();
