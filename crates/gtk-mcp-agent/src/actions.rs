@@ -12,7 +12,7 @@
 //! by name through `gtk_widget_activate_action`.
 
 use crate::agent::Agent;
-use crate::json::scalar_to_json;
+use crate::json::{kind, scalar_to_json};
 use crate::secrecy;
 use gio::prelude::*;
 use glib::translate::{FromGlib, IntoGlib};
@@ -431,17 +431,6 @@ pub fn describe_group_entry(agent: &Agent, g: &GroupRef, action: &str, secret: b
 
 // -- GVariant <-> JSON ----------------------------------------------------------
 
-fn kind_of(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "a boolean",
-        Value::Number(_) => "a number",
-        Value::String(_) => "a string",
-        Value::Array(_) => "an array",
-        Value::Object(_) => "an object",
-    }
-}
-
 fn f64_json(x: f64) -> Value {
     serde_json::Number::from_f64(x).map(Value::Number).unwrap_or_else(|| Value::String(x.to_string()))
 }
@@ -502,7 +491,7 @@ fn int_of(v: &Value) -> Option<i128> {
 /// (it may be secret), only its JSON kind.
 pub fn json_to_variant(ty: &glib::VariantTy, v: &Value) -> Result<glib::Variant, String> {
     let ts = ty.as_str();
-    let expected = |what: &str| format!("expected {what} for GVariant type '{ts}', got {}", kind_of(v));
+    let expected = |what: &str| format!("expected {what} for GVariant type '{ts}', got {}", kind(v));
     macro_rules! int {
         ($t:ty) => {{
             let n = int_of(v).ok_or_else(|| expected("an integer"))?;
@@ -583,7 +572,7 @@ pub fn parameter_for(ptype: Option<&glib::VariantTy>, value: Option<&Value>) -> 
     let invalid = |m: String| AgentError::new(ErrorCode::InvalidValue, m);
     match (ptype, value) {
         (None, None | Some(Value::Null)) => Ok(None),
-        (None, Some(v)) => Err(invalid(format!("the action takes no parameter, got {}", kind_of(v)))),
+        (None, Some(v)) => Err(invalid(format!("the action takes no parameter, got {}", kind(v)))),
         (Some(t), None | Some(Value::Null)) if !t.is_maybe() => {
             Err(invalid(format!("the action needs a parameter of GVariant type '{}'", t.as_str())))
         }
@@ -603,7 +592,7 @@ pub fn parameter_untyped(value: Option<&Value>) -> Result<Option<glib::Variant>,
             ErrorCode::InvalidValue,
             format!(
                 "the parameter type of this action is not known (unregistered group): pass GVariant text such as \"'abc'\" or \"uint32 5\", got {}",
-                kind_of(v)
+                kind(v)
             ),
         )),
     }

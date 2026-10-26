@@ -29,6 +29,9 @@ const SCHEMA_XML: &str = r#"<schemalist>
     <key name="ratio" type="d"><default>0.5</default></key>
     <key name="api-token" type="s"><default>''</default></key>
   </schema>
+  <schema id="dev.gtkmcp.Elsewhere" path="/dev/gtkmcp/elsewhere/">
+    <key name="knob" type="i"><default>1</default></key>
+  </schema>
 </schemalist>"#;
 const RES_XML: &str = r#"<gresources><gresource prefix="/dev/gtkmcp/fixture">
   <file compressed="true">hello.txt</file><file>data/blob.bin</file></gresource></gresources>"#;
@@ -561,6 +564,18 @@ async fn gsettings_inspect_set_and_read_back() {
     let out = c.call("inspect_gsettings", json!({})).await.unwrap();
     assert!(!out.text_content().contains(TOKEN));
     assert_eq!(find_key(&out.json_content().unwrap()["schemas"][0], "api-token")["value"], json!({"redacted": true}));
+    // a rejected write never echoes the offered value
+    let e = c.err("set_gsetting", json!({"schema": SCHEMA_ID, "key": "api-token", "value": [TOKEN]})).await;
+    assert_eq!(e.code, ErrorCode::InvalidValue);
+    assert!(!format!("{e:?}").contains(TOKEN), "{e:?}");
+
+    // schemas outside the app (registered objects and its application id) are read-only
+    let r = c.json("inspect_gsettings", json!({"schema": "dev.gtkmcp.Elsewhere"})).await;
+    assert_eq!(find_key(&r["schemas"][0], "knob")["value"], 1);
+    let e = c.err("set_gsetting", json!({"schema": "dev.gtkmcp.Elsewhere", "key": "knob", "value": 2})).await;
+    assert_eq!(e.code, ErrorCode::UnsupportedOperation, "{e:?}");
+    let r = c.json("inspect_gsettings", json!({"schema": "dev.gtkmcp.Elsewhere"})).await;
+    assert_eq!(find_key(&r["schemas"][0], "knob")["value"], 1, "nothing was written");
 
     // read-only tool works without mutations; the write is gated
     let (ro, _b2) = app_broker(&fx, false);

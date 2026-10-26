@@ -203,7 +203,7 @@ As built (M5/M6):
 |---|---|---|
 | `app_open` | M | `g_application_open` with files, or `activate` |
 | `inspect_gsettings` | R | The app's GSettings schemas, keys, values |
-| `set_gsetting` | M | Write a key |
+| `set_gsetting` | M | Write a key of the app's own schemas (registered with `register_settings` or under its application id); other schemas are read-only |
 | `list_resources` | R | Registered GResource paths |
 | `read_resource` | R | Read one resource, size-limited |
 

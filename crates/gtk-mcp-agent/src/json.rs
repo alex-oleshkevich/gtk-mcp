@@ -20,7 +20,8 @@ fn f32_json(x: f32) -> Value {
     if x.is_finite() { f64_json(x.to_string().parse().unwrap_or(x as f64)) } else { Value::String(x.to_string()) }
 }
 
-fn kind(v: &Value) -> &'static str {
+/// The JSON kind of `v` for error messages, which never echo offered values.
+pub fn kind(v: &Value) -> &'static str {
     match v {
         Value::Null => "null",
         Value::Bool(_) => "a boolean",

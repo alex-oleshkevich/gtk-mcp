@@ -120,8 +120,10 @@ fn is_string_like(t: &VariantTy) -> bool {
     matches!(t.as_str(), "s" | "o" | "g")
 }
 
+/// JSON to a GVariant of type `ty`. Messages name the JSON kind, never the
+/// value: it may be written to a key whose name looks secret.
 fn json_to_variant(ty: &VariantTy, v: &Value) -> Result<Variant, String> {
-    let want = |what: &str| format!("expected {what} for GVariant type '{}', got {}", ty.as_str(), v);
+    let want = |what: &str| format!("expected {what} for GVariant type '{}', got {}", ty.as_str(), crate::json::kind(v));
     fn int(v: &Value, lo: i128, hi: i128) -> Option<i128> {
         let n = v.as_i64().map(i128::from).or_else(|| v.as_u64().map(i128::from))?;
         (lo..=hi).contains(&n).then_some(n)
@@ -139,7 +141,8 @@ fn json_to_variant(ty: &VariantTy, v: &Value) -> Result<Variant, String> {
         "s" => v.as_str().map(|s| s.to_variant()).ok_or_else(|| want("a string")),
         "o" | "g" => {
             let s = v.as_str().ok_or_else(|| want("a string"))?;
-            Variant::parse(Some(ty), &s.to_variant().print(false)).map_err(|e| format!("{s:?}: {}", e.message()))
+            Variant::parse(Some(ty), &s.to_variant().print(false))
+                .map_err(|e| format!("not a valid GVariant '{}': {}", ty.as_str(), e.message()))
         }
         "v" => {
             let t = v.get("type").and_then(Value::as_str).ok_or_else(|| want(r#"{"type": "<gvariant type>", "value": ...}"#))?;
@@ -309,6 +312,26 @@ pub fn set_gsetting(agent: &Rc<Agent>, p: SetGsettingParams) -> Result<Value, Ag
         return Err(err(ErrorCode::NotFound, format!("schema '{}' has no key '{}'", p.schema, p.key))
             .with_data(json!({ "keys": schema.list_keys().iter().map(|k| k.to_string()).collect::<Vec<_>>() })));
     }
+    // Only the app's own settings: other schemas (e.g. org.gnome.desktop.*) live
+    // in the shared backend and would change the whole desktop.
+    let registered = agent
+        .app_state
+        .live_settings()
+        .iter()
+        .any(|s| s.property::<Option<String>>("schema-id").as_deref() == Some(p.schema.as_str()));
+    let app_id = agent.app.application_id().map(|s| s.to_string());
+    let own = app_id.as_deref().is_some_and(|id| p.schema == id || p.schema.strip_prefix(id).is_some_and(|r| r.starts_with('.')));
+    if !registered && !own {
+        return Err(err(
+            ErrorCode::UnsupportedOperation,
+            format!(
+                "schema '{}' does not belong to this app: set_gsetting writes schemas the app registered (register_settings) \
+                 or ones under its application id ({})",
+                p.schema,
+                app_id.as_deref().unwrap_or("none")
+            ),
+        ));
+    }
     let settings = settings_for(agent, &schema, p.path.as_deref())?.ok_or_else(|| {
         AgentError::invalid_params(format!("'{}' is a relocatable schema: pass `path`", p.schema))
     })?;
@@ -317,6 +340,7 @@ pub fn set_gsetting(agent: &Rc<Agent>, p: SetGsettingParams) -> Result<Value, Ag
     }
     let key = schema.key(&p.key);
     let ty = key.value_type();
+    let secret = key_is_secret(&p.key);
     let variant = match (&p.value, &p.value_text) {
         (Some(v), None) => json_to_variant(&ty, v).map_err(|m| err(ErrorCode::InvalidValue, m))?,
         (None, Some(t)) => Variant::parse(Some(&ty), t)
@@ -325,13 +349,10 @@ pub fn set_gsetting(agent: &Rc<Agent>, p: SetGsettingParams) -> Result<Value, Ag
     };
     if !key.range_check(&variant) {
         let range = key.range();
-        return Err(err(
-            ErrorCode::InvalidValue,
-            format!("value {} is outside the range of key '{}'", variant.print(true), p.key),
-        )
-        .with_data(json!({ "range": variant_to_json(&range) })));
+        let shown = if secret { "the value".to_string() } else { format!("value {}", variant.print(true)) };
+        return Err(err(ErrorCode::InvalidValue, format!("{shown} is outside the range of key '{}'", p.key))
+            .with_data(json!({ "range": variant_to_json(&range) })));
     }
-    let secret = key_is_secret(&p.key);
     let previous = settings.value(&p.key);
     settings.set_value(&p.key, &variant).map_err(|e| err(ErrorCode::InvalidValue, format!("write rejected: {e}")))?;
     let observed = settings.value(&p.key);
