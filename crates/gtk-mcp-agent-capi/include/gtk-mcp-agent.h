@@ -3,6 +3,8 @@
  * Every function must be called on the GTK main thread, after GTK is
  * initialized, and is inert unless the process environment has GTK_MCP=1.
  * The library links the host's libgtk-4 dynamically; it does not embed GTK.
+ * NULL instances are ignored; instances of the wrong type are refused with a
+ * critical, as GTK's own functions do.
  *
  * Kept in sync with src/lib.rs and GtkMcp-1.gir by the test
  * crates/gtk-mcp/tests/fixture_m7.rs.
@@ -38,7 +40,8 @@ void gtk_mcp_agent_register_settings (GSettings *settings);
 /**
  * Expose the JSON returned by @callback as the read-only MCP resource
  * `app-state/<name>`. @destroy is called with @user_data when the
- * registration is replaced, or immediately when the agent is inactive.
+ * registration is replaced, or immediately when the agent is inactive or
+ * @name is NULL or invalid. @destroy may call back into this API.
  */
 void gtk_mcp_agent_register_state (const char *name,
                                    GtkMcpStateFunc callback,

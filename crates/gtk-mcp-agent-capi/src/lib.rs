@@ -7,7 +7,8 @@
 //! (`GTK_MCP=1`). The header is `include/gtk-mcp-agent.h`; `GtkMcp-1.gir`
 //! describes the same functions for GObject introspection.
 
-use glib::translate::FromGlibPtrBorrow;
+use glib::translate::{FromGlibPtrBorrow, IntoGlib};
+use glib::types::StaticType;
 use gtk4 as gtk;
 use std::ffi::{c_char, c_void, CStr};
 
@@ -24,6 +25,20 @@ fn str_arg<'a>(p: *const c_char) -> Option<&'a str> {
     unsafe { CStr::from_ptr(p) }.to_str().ok()
 }
 
+/// The precondition GTK's own API checks with `g_return_if_fail (GTK_IS_…)`:
+/// non-NULL `p` is an instance of `T` (a class or an interface). Otherwise a
+/// critical names `func` and the expected type, and the call does nothing.
+fn instance_of<T: StaticType>(func: &str, arg: &str, p: *const c_void) -> bool {
+    let ty = T::static_type();
+    // SAFETY: `p` is non-NULL and, per the header, a GTypeInstance; the check
+    // only reads its class.
+    let ok = unsafe { glib::gobject_ffi::g_type_check_instance_is_a(p as *mut _, ty.into_glib()) } != 0;
+    if !ok {
+        glib::g_critical!("GtkMcp", "{func}: assertion '{arg} is a {}' failed", ty.name());
+    }
+    ok
+}
+
 /// Attach the agent to `app` (the C form of `gtk_mcp_agent::attach`).
 ///
 /// # Safety
@@ -31,7 +46,7 @@ fn str_arg<'a>(p: *const c_char) -> Option<&'a str> {
 /// call must happen on the GTK main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gtk_mcp_agent_attach(app: *mut gtk::ffi::GtkApplication) {
-    if app.is_null() {
+    if app.is_null() || !instance_of::<gtk::Application>("gtk_mcp_agent_attach", "app", app.cast()) {
         return;
     }
     // SAFETY: `app` is a live GtkApplication. Borrowed: no refcount change, and in
@@ -47,7 +62,7 @@ pub unsafe extern "C" fn gtk_mcp_agent_attach(app: *mut gtk::ffi::GtkApplication
 /// `object` must be a valid `GObject*` (or NULL, ignored); main thread only.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gtk_mcp_agent_mark_secret(object: *mut glib::gobject_ffi::GObject) {
-    if object.is_null() {
+    if object.is_null() || !instance_of::<glib::Object>("gtk_mcp_agent_mark_secret", "object", object.cast()) {
         return;
     }
     // SAFETY: valid GObject, borrowed (see `gtk_mcp_agent_attach`).
@@ -69,6 +84,10 @@ pub unsafe extern "C" fn gtk_mcp_agent_register_action_group(
     if widget.is_null() || group.is_null() {
         return;
     }
+    const F: &str = "gtk_mcp_agent_register_action_group";
+    if !instance_of::<gtk::Widget>(F, "widget", widget.cast()) || !instance_of::<gio::ActionGroup>(F, "group", group.cast()) {
+        return;
+    }
     // SAFETY: valid instances, borrowed (a floating widget must stay floating).
     let (widget, group) = unsafe { (gtk::Widget::from_glib_borrow(widget), gio::ActionGroup::from_glib_borrow(group)) };
     gtk_mcp_agent::register_action_group(&*widget, prefix, &*group);
@@ -80,7 +99,7 @@ pub unsafe extern "C" fn gtk_mcp_agent_register_action_group(
 /// `settings` a valid `GSettings*` (NULL ignored); main thread only.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gtk_mcp_agent_register_settings(settings: *mut gio::ffi::GSettings) {
-    if settings.is_null() {
+    if settings.is_null() || !instance_of::<gio::Settings>("gtk_mcp_agent_register_settings", "settings", settings.cast()) {
         return;
     }
     // SAFETY: valid GSettings, borrowed.
@@ -119,7 +138,9 @@ impl StateCallback {
 }
 
 /// Expose `callback`'s JSON as the read-only resource `app-state/<name>`.
-/// `destroy` runs when the registration is replaced or the process ends the agent.
+/// `destroy` runs when the registration is replaced, or at once when the agent
+/// is inactive, `callback` is NULL or `name` is NULL/invalid. It may call back
+/// into this API.
 ///
 /// # Safety
 /// `name` NUL-terminated; `callback` valid for the lifetime of the registration; main thread only.

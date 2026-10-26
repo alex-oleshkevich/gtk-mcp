@@ -241,6 +241,49 @@ int main (void) {
     assert_eq!(run(&mut cmd, "inert C program").trim(), "ok");
 }
 
+/// gm-4ej: like GTK's own API, the entry points refuse instances of the wrong
+/// type with a critical instead of using them as the declared type.
+#[test]
+fn c_api_refuses_wrong_instance_types_with_a_critical() {
+    let a = artifacts();
+    let src = a.out.join("types.c");
+    std::fs::write(
+        &src,
+        r#"#include <gtk-mcp-agent.h>
+#include <stdio.h>
+
+int main (void) {
+  GObject *plain = g_object_new (G_TYPE_OBJECT, NULL);
+  GtkApplication *app = gtk_application_new ("dev.gtkmcp.Types", G_APPLICATION_DEFAULT_FLAGS);
+  gtk_mcp_agent_attach ((GtkApplication *) plain);
+  gtk_mcp_agent_attach (app);
+  gtk_mcp_agent_register_settings ((GSettings *) app);
+  gtk_mcp_agent_register_action_group ((GtkWidget *) plain, "x", (GActionGroup *) app);
+  gtk_mcp_agent_mark_secret (plain);
+  g_object_unref (plain);
+  puts ("ok");
+  return 0;
+}
+"#,
+    )
+    .unwrap();
+    let exe = a.out.join("types");
+    compile_c(&src, &exe, &a.out);
+    let dir = tempfile::tempdir().unwrap();
+    let mut cmd = Command::new(&exe);
+    cmd.env("GTK_MCP", "1").env("GTK_MCP_DIR", dir.path());
+    let out = run(&mut cmd, "wrong-types C program");
+    assert!(out.contains("ok"), "{out}");
+    for expected in [
+        "gtk_mcp_agent_attach: assertion 'app is a GtkApplication' failed",
+        "gtk_mcp_agent_register_settings: assertion 'settings is a GSettings' failed",
+        "gtk_mcp_agent_register_action_group: assertion 'widget is a GtkWidget' failed",
+    ] {
+        assert!(out.contains(expected), "missing critical '{expected}':\n{out}");
+    }
+    assert_eq!(out.matches("CRITICAL").count(), 3, "only the three refused calls are reported:\n{out}");
+}
+
 // ---- typelib import (no display needed) --------------------------------------------
 
 #[test]

@@ -25,7 +25,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn register(&self, name: String, read: StateFn) {
-        self.states.borrow_mut().insert(name, read);
+        let replaced = self.states.borrow_mut().insert(name, read);
+        // Dropped after the borrow ends: dropping it may run app code (a C
+        // caller's GDestroyNotify) that registers or reads state again.
+        drop(replaced);
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -130,5 +133,30 @@ mod tests {
         for bad in ["", "app-state/", "a//b", "../x", "a/./b", "a b", "a?b"] {
             assert!(normalize_name(bad).is_err(), "{bad}");
         }
+    }
+
+    /// gm-kvv: replacing a registration drops the old closure; whatever its
+    /// drop runs (a C caller's GDestroyNotify) may use the registry again.
+    #[test]
+    fn replaced_closure_is_dropped_outside_the_registry_borrow() {
+        struct OnDrop(Rc<AppState>, Rc<std::cell::Cell<bool>>);
+        impl Drop for OnDrop {
+            fn drop(&mut self) {
+                assert_eq!(self.0.names(), vec!["a".to_string()]);
+                self.0.register("b".into(), Rc::new(|| json!(2)));
+                self.1.set(true);
+            }
+        }
+        let state = Rc::new(AppState::default());
+        let dropped = Rc::new(std::cell::Cell::new(false));
+        let guard = OnDrop(state.clone(), dropped.clone());
+        state.register("a".into(), Rc::new(move || {
+            let _ = &guard;
+            json!(1)
+        }));
+        state.register("a".into(), Rc::new(|| json!(3)));
+        assert!(dropped.get(), "the replaced closure was dropped");
+        assert_eq!(state.names(), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(state.read("a").unwrap(), json!(3));
     }
 }
