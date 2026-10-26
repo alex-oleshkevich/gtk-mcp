@@ -17,6 +17,8 @@ thread_local! {
     static VICTIM: RefCell<Option<gtk::Label>> = const { RefCell::new(None) };
 }
 
+mod m2;
+
 fn named<W: IsA<gtk::Widget>>(w: W, name: &str) -> W {
     w.set_widget_name(name);
     w
@@ -234,6 +236,8 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     scroll.set_vexpand(true);
 
     let win = adw::ApplicationWindow::builder().application(app).title("gtk-mcp fixture").default_width(480).default_height(720).content(&scroll).build();
+
+    m2::extras(&root, &win);
 
     // Actions (AC-7): win.save, stateful win.theme (string), and win.limit (int
     // state that rejects values above 10).

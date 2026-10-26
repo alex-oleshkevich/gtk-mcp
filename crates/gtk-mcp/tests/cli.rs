@@ -156,6 +156,17 @@ fn stdio_layout_style_toolset_adds_nine_annotated_tools() {
 }
 
 #[test]
+fn stdio_toolsets_actions_adds_the_nine_actions_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::start(dir.path(), &["--toolsets", "core,actions"]);
+    let tools = c.tools();
+    assert_eq!(tools.len(), 27);
+    for n in ["list_actions", "activate_shortcut", "inspect_controllers"] {
+        assert!(tools.iter().any(|t| t["name"] == n), "{n}");
+    }
+}
+
+#[test]
 fn stdio_exclude_tools_removes_from_list_and_dispatch() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &["--exclude-tools", "capture"]);

@@ -6,9 +6,11 @@ pub mod rpc;
 pub mod snapshot;
 pub mod tools;
 pub mod tools_m3;
+pub mod tools_m2;
 pub mod types;
 
 pub use rpc::*;
 pub use tools::*;
 pub use tools_m3::*;
+pub use tools_m2::*;
 pub use types::*;
