@@ -63,6 +63,33 @@ fn collect(n: &Value, out: &mut HashMap<String, Known>) {
     }
 }
 
+/// The `read_events` record of one AT-SPI event. Secret objects carry the
+/// event kind and state only: no name, and no detail numbers for events whose
+/// details are text offsets or lengths (`object:text-changed:insert` carries the
+/// position and length of the inserted text).
+fn event_record(event: &str, d1: i32, d2: i32, path: &str, k: &Known) -> Value {
+    let mut rec = json!({
+        "kind": "atspi",
+        "source": "atspi",
+        "subscription": "atspi",
+        "event": event,
+        "path": path,
+        "ref": k.r#ref,
+        "role": k.role,
+    });
+    let state_only = ["object:state-changed", "focus:", "window:"].iter().any(|p| event.starts_with(p));
+    if !k.secret || state_only {
+        rec["detail1"] = json!(d1);
+        rec["detail2"] = json!(d2);
+    }
+    if k.secret {
+        rec["secret"] = json!(true);
+    } else {
+        rec["name"] = json!(k.name);
+    }
+    rec
+}
+
 impl Broker {
     /// Start forwarding the AT-SPI events of `session`'s app into its event
     /// ring. `kinds` filters by event-name prefix (`object:state-changed:focused`,
@@ -148,23 +175,7 @@ impl Broker {
                     }
                 }
                 let k = known.get(&path).cloned().unwrap_or_default();
-                let mut rec = json!({
-                    "kind": "atspi",
-                    "source": "atspi",
-                    "subscription": "atspi",
-                    "event": event,
-                    "detail1": d1,
-                    "detail2": d2,
-                    "path": path,
-                    "ref": k.r#ref,
-                    "role": k.role,
-                });
-                if !k.secret {
-                    rec["name"] = json!(k.name);
-                } else {
-                    rec["secret"] = json!(true);
-                }
-                sess.push_event(rec);
+                sess.push_event(event_record(&event, d1, d2, &path, &k));
             }
         });
         if let Some(old) = lock(&self.atspi_watches).insert(session.id().to_owned(), handle) {
@@ -191,5 +202,40 @@ impl Broker {
             return Err(AgentError::new(ErrorCode::Unavailable, r.clone()));
         }
         Ok((source, resp["roots"].as_array().cloned().unwrap_or_default()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_records_carry_no_name_and_no_text_offsets() {
+        let secret = Known { r#ref: Some("w9".into()), role: "password text".into(), name: None, secret: true };
+        let r = event_record("object:text-changed:insert", 3, 1, "/p", &secret);
+        assert_eq!(r["secret"], true);
+        for k in ["name", "detail1", "detail2"] {
+            assert!(r.get(k).is_none(), "{k}: {r}");
+        }
+        let r = event_record("object:text-caret-moved", 4, 0, "/p", &secret);
+        assert!(r.get("detail1").is_none(), "{r}");
+        // State changes keep their state value.
+        let r = event_record("object:state-changed:focused", 1, 0, "/p", &secret);
+        assert_eq!((&r["detail1"], &r["detail2"]), (&json!(1), &json!(0)));
+
+        let plain = Known { r#ref: Some("w1".into()), role: "text".into(), name: Some("Name".into()), secret: false };
+        let r = event_record("object:text-changed:insert", 3, 1, "/q", &plain);
+        assert_eq!((&r["detail1"], &r["detail2"], &r["name"]), (&json!(3), &json!(1), &json!("Name")));
+        assert!(r.get("secret").is_none());
+    }
+
+    #[test]
+    fn collected_secrecy_covers_unjoined_descendants() {
+        let tree = json!({"ref": "w1", "secret": true, "atspi": {"path": "/e", "role": "password text"}, "children": [
+            {"ref": null, "secret": true, "atspi": {"path": "/e/t", "role": "text", "redacted": true}, "children": []}
+        ]});
+        let mut known = HashMap::new();
+        collect(&tree, &mut known);
+        assert!(known["/e/t"].secret && known["/e/t"].name.is_none());
     }
 }

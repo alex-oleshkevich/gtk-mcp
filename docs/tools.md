@@ -152,8 +152,10 @@ As built (M5/M6):
   it. `unwatch {subscription: "atspi"}` stops it, including after app exit.
   Records in `read_events` have `{kind: "atspi", source: "atspi",
   subscription: "atspi", event, detail1, detail2, path, ref, role, name}`;
-  `ref` is the joined widget ref or null. Secret widgets omit `name` and
-  carry `secret: true`. The subscription and kind filters work for these
+  `ref` is the joined widget ref or null. Secret widgets (and every AT-SPI node
+  below them) omit `name` and carry `secret: true`; their `detail1`/`detail2`
+  are kept only for state, focus and window events, since text events carry
+  offsets and lengths. The subscription and kind filters work for these
   broker-sourced records as for agent events.
 - Events are `$/event` notifications kept in the session's bounded ring:
   `{kind: notify|signal|items_changed|selection_changed, subscription, target,

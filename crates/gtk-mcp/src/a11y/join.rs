@@ -206,14 +206,20 @@ pub fn atspi_json(a: &AtNode, redact: bool) -> Value {
     Value::Object(m)
 }
 
-fn unjoined(a: &AtNode, stats: &mut JoinStats) -> Value {
+/// `secret`: an ancestor is secret. Secrecy covers a secret widget's whole
+/// subtree (plan 4.4), including AT-SPI nodes GTK exports below it.
+fn unjoined(a: &AtNode, stats: &mut JoinStats, secret: bool) -> Value {
     stats.atspi_nodes += 1;
     stats.unjoined_atspi += 1;
-    let kids: Vec<Value> = a.children.iter().map(|c| unjoined(c, stats)).collect();
-    json!({"ref": Value::Null, "source": "atspi", "role": a.role_name, "atspi": atspi_json(a, false), "children": kids})
+    let kids: Vec<Value> = a.children.iter().map(|c| unjoined(c, stats, secret)).collect();
+    let mut out = json!({"ref": Value::Null, "source": "atspi", "role": a.role_name, "atspi": atspi_json(a, secret), "children": kids});
+    if secret {
+        out["secret"] = json!(true);
+    }
+    out
 }
 
-fn join_node(g: &Value, a: &AtNode, stats: &mut JoinStats, by_id: bool) -> Value {
+fn join_node(g: &Value, a: &AtNode, stats: &mut JoinStats, by_id: bool, inherited: bool) -> Value {
     stats.gtk_nodes += 1;
     stats.atspi_nodes += 1;
     stats.joined += 1;
@@ -225,34 +231,41 @@ fn join_node(g: &Value, a: &AtNode, stats: &mut JoinStats, by_id: bool) -> Value
         stats.role_exact += 1;
     }
     let mut out = g.as_object().cloned().unwrap_or_default();
-    let secret = g["secret"].as_bool().unwrap_or(false);
+    let secret = inherited || g["secret"].as_bool().unwrap_or(false);
+    if secret {
+        out.insert("secret".into(), json!(true));
+    }
     out.insert("source".into(), json!("gtk+atspi"));
     out.insert("atspi".into(), atspi_json(a, secret));
-    let kids = join_children(g["children"].as_array().map_or(&[][..], |v| v.as_slice()), &a.children, stats);
+    let kids = join_children(g["children"].as_array().map_or(&[][..], |v| v.as_slice()), &a.children, stats, secret);
     out.insert("children".into(), Value::Array(kids));
     Value::Object(out)
 }
 
-fn join_children(g: &[Value], a: &[AtNode], stats: &mut JoinStats) -> Vec<Value> {
+fn join_children(g: &[Value], a: &[AtNode], stats: &mut JoinStats, secret: bool) -> Vec<Value> {
     let gr: Vec<&Value> = g.iter().collect();
     align(&gr, a)
         .into_iter()
         .map(|s| match s {
             Step::Pair(i, j) => {
                 let by_id = matches!((g[i]["buildable_id"].as_str(), a[j].accessible_id.as_deref()), (Some(x), Some(y)) if x == y);
-                join_node(&g[i], &a[j], stats, by_id)
+                join_node(&g[i], &a[j], stats, by_id, secret)
             }
-            Step::Gtk(i) => gtk_only(&g[i], stats),
-            Step::At(j) => unjoined(&a[j], stats),
+            Step::Gtk(i) => gtk_only(&g[i], stats, secret),
+            Step::At(j) => unjoined(&a[j], stats, secret),
         })
         .collect()
 }
 
-fn gtk_only(g: &Value, stats: &mut JoinStats) -> Value {
+fn gtk_only(g: &Value, stats: &mut JoinStats, inherited: bool) -> Value {
     stats.gtk_nodes += 1;
     let mut out = g.as_object().cloned().unwrap_or_default();
+    let secret = inherited || g["secret"].as_bool().unwrap_or(false);
+    if secret {
+        out.insert("secret".into(), json!(true));
+    }
     out.insert("source".into(), json!("gtk"));
-    let kids: Vec<Value> = g["children"].as_array().into_iter().flatten().map(|c| gtk_only(c, stats)).collect();
+    let kids: Vec<Value> = g["children"].as_array().into_iter().flatten().map(|c| gtk_only(c, stats, secret)).collect();
     out.insert("children".into(), Value::Array(kids));
     Value::Object(out)
 }
@@ -261,7 +274,7 @@ fn gtk_only(g: &Value, stats: &mut JoinStats) -> Value {
 pub fn join_roots(roots: &[Value], app: &AtNode) -> (Vec<Value>, JoinStats) {
     let mut stats = JoinStats::default();
     stats.atspi_nodes += 1; // the application node itself
-    let out = join_children(roots, &app.children, &mut stats);
+    let out = join_children(roots, &app.children, &mut stats, false);
     (out, stats)
 }
 
@@ -353,5 +366,23 @@ mod tests {
         assert_eq!(out[0]["atspi"]["redacted"], true);
         assert!(out[0]["atspi"]["name"].is_null());
         assert_eq!(out[0]["atspi"]["has_name"], true);
+    }
+
+    #[test]
+    fn descendants_of_secret_nodes_are_secret_on_both_sides() {
+        let mut gw = g("w1", "text-box", "", vec![g("w2", "none", "", vec![g("w3", "img", "", vec![])])]);
+        gw["secret"] = json!(true);
+        // GTK exports a node below the entry that the agent's tree does not have.
+        let app = at("application", "", vec![at("text box", "", vec![at("text", "inner-name", vec![at("label", "deep", vec![])])])]);
+        let (out, stats) = join_roots(&[gw], &app);
+        assert_eq!(stats.unjoined_atspi, 2, "{stats:?}");
+        let s = serde_json::to_string(&out).unwrap();
+        fn all_secret(n: &Value) -> bool {
+            n["secret"] == true
+                && n["atspi"].get("name").is_none()
+                && n["atspi"].get("description").is_none()
+                && n["children"].as_array().into_iter().flatten().all(all_secret)
+        }
+        assert!(all_secret(&out[0]), "{s}");
     }
 }
