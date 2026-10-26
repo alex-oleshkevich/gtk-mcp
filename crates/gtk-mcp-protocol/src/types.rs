@@ -272,6 +272,7 @@ pub struct Observe {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InteractParams {
+    #[serde(default)]
     pub session: String,
     pub target: Target,
     #[serde(flatten)]
@@ -298,6 +299,7 @@ pub struct BatchStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct BatchParams {
+    #[serde(default)]
     pub session: String,
     pub steps: Vec<BatchStep>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -306,6 +308,7 @@ pub struct BatchParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CaptureParams {
+    #[serde(default)]
     pub session: String,
     pub target: Target,
     #[serde(default, skip_serializing_if = "Option::is_none")]
