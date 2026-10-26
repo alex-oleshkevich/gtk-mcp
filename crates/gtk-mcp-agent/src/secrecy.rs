@@ -74,13 +74,16 @@ fn propagate(obj: &glib::Object) {
             }
         }
     }
-    let buffer: Option<gtk::EntryBuffer> = if let Some(e) = obj.dynamic_cast_ref::<gtk::Entry>() {
-        Some(e.buffer())
+    let buffer: Option<glib::Object> = if let Some(e) = obj.dynamic_cast_ref::<gtk::Entry>() {
+        Some(e.buffer().upcast())
+    } else if let Some(t) = obj.dynamic_cast_ref::<gtk::Text>() {
+        Some(t.buffer().upcast())
     } else {
-        obj.dynamic_cast_ref::<gtk::Text>().map(|t| t.buffer())
+        // A secret text view's buffer is secret wherever else it is shown.
+        obj.dynamic_cast_ref::<gtk::TextView>().map(|t| t.buffer().upcast())
     };
     if let Some(b) = buffer {
-        set_flag(b.upcast_ref(), FLAG_SECRET);
+        set_flag(&b, FLAG_SECRET);
     }
 }
 

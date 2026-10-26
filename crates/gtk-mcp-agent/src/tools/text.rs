@@ -44,7 +44,7 @@ fn redacted_error(target: &str) -> AgentError {
 }
 
 /// A bare buffer is secret when it was marked so, or when any text view
-/// showing it is secret.
+/// showing it is secret (detached content included).
 fn buffer_is_secret(buf: &gtk::TextBuffer) -> bool {
     if secrecy::is_secret(buf) {
         return true;
@@ -55,14 +55,7 @@ fn buffer_is_secret(buf: &gtk::TextBuffer) -> bool {
                 return true;
             }
         }
-        let mut c = w.first_child();
-        while let Some(child) = c {
-            if walk(&child, buf) {
-                return true;
-            }
-            c = child.next_sibling();
-        }
-        false
+        widgets::children(w).iter().any(|c| walk(&c.widget, buf))
     }
     selector::toplevels().iter().any(|t| walk(t.upcast_ref(), buf))
 }

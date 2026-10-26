@@ -315,6 +315,46 @@ async fn set_property_cannot_unseal_an_unobserved_secret() {
     }
 }
 
+// ---- gm-z9w / gm-8bz ------------------------------------------------------------
+
+/// Texts of the fixture's hidden, `mark_secret`ed widgets.
+const MARKED: &[&str] = &["vault-notes-SECRET-71c2", "vault-choice-SECRET-5e0a"];
+
+/// `mark_secret` on a text view covers its buffer wherever it is shown (a plain
+/// mirror view shares it), and on a drop-down covers its model items.
+#[tokio::test(flavor = "multi_thread")]
+async fn marked_secrets_cover_shared_buffers_and_models() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = rw(&fx);
+    let mut seen: Vec<String> = Vec::new();
+
+    // The mirror never was a secret root; it shows the secret buffer.
+    let snap = c.call("snapshot", json!({"format": "json"})).await.unwrap().json_content().unwrap();
+    seen.push(snap.to_string());
+    let mirror = node_by_name(&snap, "vault-mirror");
+    assert_eq!(mirror["secret"], true, "{mirror}");
+    assert_eq!(c.err("inspect_text", json!({"target": by_id("vault-mirror")})).await.code, ErrorCode::Redacted);
+    let got = c.json("get_property", json!({"target": by_id("vault-mirror"), "names": ["buffer"]})).await;
+    seen.push(got.to_string());
+    let buf = got["values"]["buffer"]["ref"].as_str().unwrap().to_string();
+    let text = c.json("get_property", json!({"target": buf, "names": ["text"]})).await;
+    seen.push(text.to_string());
+    assert_eq!(text["values"]["text"], json!({"redacted": true}));
+    assert_eq!(c.err("inspect_text", json!({"target": buf})).await.code, ErrorCode::Redacted);
+
+    // The marked drop-down's model items are withheld.
+    let m = c.json("inspect_model", json!({"target": by_id("vault-choices")})).await;
+    seen.push(m.to_string());
+    assert_eq!(m["items"][0]["summary"], json!({"redacted": true}), "{m}");
+
+    for (i, s) in seen.iter().enumerate() {
+        for secret in MARKED {
+            assert!(!s.contains(secret), "response #{i} leaked {secret}: {s}");
+        }
+    }
+}
+
 /// gm-ef6 / gm-yie: the `last_frame` fallback must never serve a frame painted
 /// while a secret field was peeking. Sequence: capture the window (its
 /// paintable is remembered and keeps following paints), peek (plaintext
