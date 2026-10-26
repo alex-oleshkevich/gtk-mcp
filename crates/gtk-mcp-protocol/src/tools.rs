@@ -5,6 +5,7 @@
 //! ignores it. Inside a `batch` step the agent injects the batch's session
 //! before parsing, so step arguments never repeat it.
 
+use crate::tools_m2::*;
 use crate::types::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -301,6 +302,15 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "inspect_model", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "capture", toolset: "core", mutating: false, agent: true },
     ToolSpec { name: "diff_captures", toolset: "core", mutating: false, agent: false },
+    ToolSpec { name: "list_actions", toolset: "actions", mutating: false, agent: true },
+    ToolSpec { name: "inspect_action", toolset: "actions", mutating: false, agent: true },
+    ToolSpec { name: "activate_action", toolset: "actions", mutating: true, agent: true },
+    ToolSpec { name: "change_action_state", toolset: "actions", mutating: true, agent: true },
+    ToolSpec { name: "inspect_action_binding", toolset: "actions", mutating: false, agent: true },
+    ToolSpec { name: "inspect_menu", toolset: "actions", mutating: false, agent: true },
+    ToolSpec { name: "inspect_shortcuts", toolset: "actions", mutating: false, agent: true },
+    ToolSpec { name: "activate_shortcut", toolset: "actions", mutating: true, agent: true },
+    ToolSpec { name: "inspect_controllers", toolset: "actions", mutating: false, agent: true },
 ];
 
 pub fn tool_spec(name: &str) -> Option<&'static ToolSpec> {
@@ -356,6 +366,15 @@ pub fn parse_params(tool: &str, args: Value) -> Result<(), String> {
         "inspect_model" => chk!(InspectModelParams),
         "capture" => chk!(CaptureParams),
         "diff_captures" => chk!(DiffCapturesParams),
+        "list_actions" => chk!(ListActionsParams),
+        "inspect_action" => chk!(InspectActionParams),
+        "activate_action" => chk!(ActivateActionParams),
+        "change_action_state" => chk!(ChangeActionStateParams),
+        "inspect_action_binding" => chk!(InspectActionBindingParams),
+        "inspect_menu" => chk!(InspectMenuParams),
+        "inspect_shortcuts" => chk!(InspectShortcutsParams),
+        "activate_shortcut" => chk!(ActivateShortcutParams),
+        "inspect_controllers" => chk!(InspectControllersParams),
         other => Err(format!("unknown tool '{other}'")),
     }
 }

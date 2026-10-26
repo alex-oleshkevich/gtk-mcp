@@ -6,13 +6,17 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::rc::Rc;
 
+pub mod actions;
 pub mod batch;
 pub mod capture;
+pub mod controllers;
 pub mod inspect;
 pub mod interact;
+pub mod menu;
 pub mod model;
 pub mod observe;
 pub mod props;
+pub mod shortcuts;
 pub mod query;
 pub mod signals;
 pub mod snapshot;
@@ -41,6 +45,15 @@ pub async fn dispatch(agent: &Rc<Agent>, tool: &str, params: Value, ctx: &Ctx) -
         "snapshot" => snapshot::snapshot(agent, parse(tool, params)?),
         "query" => query::query(agent, parse(tool, params)?),
         "inspect" => inspect::inspect(agent, parse(tool, params)?),
+        "list_actions" => actions::list_actions(agent, parse(tool, params)?),
+        "inspect_action" => actions::inspect_action(agent, parse(tool, params)?),
+        "activate_action" => actions::activate_action(agent, parse(tool, params)?, ctx).await,
+        "change_action_state" => actions::change_action_state(agent, parse(tool, params)?, ctx).await,
+        "inspect_action_binding" => menu::inspect_action_binding(agent, parse(tool, params)?),
+        "inspect_menu" => menu::inspect_menu(agent, parse(tool, params)?),
+        "inspect_shortcuts" => shortcuts::inspect_shortcuts(agent, parse(tool, params)?),
+        "activate_shortcut" => shortcuts::activate_shortcut(agent, parse(tool, params)?, ctx).await,
+        "inspect_controllers" => controllers::inspect_controllers(agent, parse(tool, params)?),
         other => Err(AgentError::new(
             gtk_mcp_protocol::ErrorCode::NotFound,
             format!("method '{other}' is not implemented by this agent"),

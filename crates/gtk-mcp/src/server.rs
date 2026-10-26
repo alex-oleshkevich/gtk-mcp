@@ -17,6 +17,8 @@ use rmcp::{
 use serde::Serialize;
 use std::sync::Arc;
 
+mod actions;
+
 #[derive(Clone)]
 pub struct Server {
     broker: Arc<Broker>,
@@ -25,7 +27,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(broker: Arc<Broker>) -> Result<Self, String> {
-        let mut router = Self::tool_router();
+        let mut router = Self::tool_router() + Self::tool_router_actions();
         let registered: Vec<String> = router.list_all().iter().map(|t| t.name.to_string()).collect();
         for t in TOOLS {
             if !registered.iter().any(|n| n == t.name) {

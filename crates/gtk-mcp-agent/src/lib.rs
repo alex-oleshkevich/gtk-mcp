@@ -3,6 +3,7 @@
 //! One call, on the main thread after the application object exists:
 //! `gtk_mcp_agent::attach(&app)`. The agent is inert unless `GTK_MCP=1`.
 
+pub mod actions;
 pub mod agent;
 pub mod config;
 pub mod json;
@@ -18,6 +19,7 @@ use agent::Agent;
 use gtk4 as gtk;
 use gtk4::prelude::*;
 
+pub use actions::register_action_group;
 pub use secrecy::mark_secret;
 
 /// Attach the agent to `app`. Must be called on the main thread after
