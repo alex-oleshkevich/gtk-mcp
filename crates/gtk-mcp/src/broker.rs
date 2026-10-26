@@ -8,8 +8,9 @@ use crate::session::{HandshakeError, ProgressSink, Session, handshake};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use gtk_mcp_protocol::{
-    AgentError, BatchParams, DiffCapturesParams, DiffSnapshotsParams, ErrorCode, SessionInfo, SessionState,
-    SnapshotFormat, SnapshotParams, ToolSpec, WaitForParams, MeasureFramesParams, DEFAULT_FRAME_WINDOW_MS, MAX_FRAME_WINDOW_MS, CaptureParams, parse_params, snapshot, tool_spec,
+    AgentError, BatchParams, CaptureParams, DEFAULT_FRAME_WINDOW_MS, DEFAULT_SETTLE_TIMEOUT_MS, DiffCapturesParams,
+    DiffSnapshotsParams, ErrorCode, MAX_FRAME_WINDOW_MS, MAX_SETTLE_TIMEOUT_MS, MeasureFramesParams, SessionInfo,
+    SessionState, SnapshotFormat, SnapshotParams, ToolSpec, WaitForParams, parse_params, snapshot, tool_spec,
     validate_step,
 };
 use serde_json::{Map, Value};
@@ -374,7 +375,7 @@ impl Broker {
             }
             "capture" => {
                 let t = serde_json::from_value::<CaptureParams>(args.clone()).ok().and_then(|p| p.settle_timeout_ms);
-                t.unwrap_or(1000) + 5000
+                t.unwrap_or(DEFAULT_SETTLE_TIMEOUT_MS).min(MAX_SETTLE_TIMEOUT_MS) + 5000
             }
             "batch" => 60_000,
             "measure_frames" => {

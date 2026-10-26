@@ -8,7 +8,8 @@
 
 use crate::agent::{Agent, Ctx, run_tool};
 use gtk_mcp_protocol::{
-    AgentError, BatchParams, BatchResult, BatchStepResult, ErrorCode, tool_spec, validate_step,
+    AgentError, BatchParams, BatchResult, BatchStepResult, DEFAULT_SETTLE_TIMEOUT_MS, ErrorCode, MAX_SETTLE_TIMEOUT_MS,
+    tool_spec, validate_step,
 };
 use serde_json::{Value, json};
 use std::rc::Rc;
@@ -85,7 +86,10 @@ fn substitute(v: &mut Value, refs: &[Option<String>], step: usize) -> Result<(),
 fn step_budget(tool: &str, args: &Value) -> Duration {
     let ms = match tool {
         "wait_for" => args.get("timeout_ms").and_then(Value::as_u64).unwrap_or(5_000).min(60_000) + 2_000,
-        "capture" => args.get("settle_timeout_ms").and_then(Value::as_u64).unwrap_or(1_000) + 5_000,
+        "capture" => {
+            args.get("settle_timeout_ms").and_then(Value::as_u64).unwrap_or(DEFAULT_SETTLE_TIMEOUT_MS).min(MAX_SETTLE_TIMEOUT_MS)
+                + 5_000
+        }
         _ => DEFAULT_STEP_MS,
     };
     Duration::from_millis(ms)
@@ -178,4 +182,17 @@ pub async fn batch(agent: &Rc<Agent>, p: BatchParams, ctx: &Ctx) -> Result<Value
         }
     }
     Ok(serde_json::to_value(BatchResult { steps: results, stopped_at, cancelled }).expect("BatchResult serializes"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_budget_is_bounded_for_huge_timeouts() {
+        let cap = step_budget("capture", &json!({"settle_timeout_ms": u64::MAX}));
+        assert_eq!(cap, Duration::from_millis(MAX_SETTLE_TIMEOUT_MS + 5_000));
+        assert_eq!(step_budget("capture", &json!({})), Duration::from_millis(DEFAULT_SETTLE_TIMEOUT_MS + 5_000));
+        assert_eq!(step_budget("wait_for", &json!({"timeout_ms": u64::MAX})), Duration::from_millis(62_000));
+    }
 }

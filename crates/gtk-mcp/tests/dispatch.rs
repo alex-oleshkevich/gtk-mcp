@@ -48,9 +48,12 @@ async fn dispatch_deadline_formulas() {
     b.call_tool("wait_for", json!({"condition":"exists","target":"w1"})).await.unwrap();
     b.call_tool("capture", json!({"target":"w1","settle_timeout_ms":250})).await.unwrap();
     b.call_tool("capture", json!({"target":"w1"})).await.unwrap();
+    // A huge settle bound neither overflows nor reaches the agent unclamped.
+    b.call_tool("capture", json!({"target":"w1","settle_timeout_ms":u64::MAX})).await.unwrap();
     b.call_tool("batch", json!({"steps":[{"tool":"list_windows","arguments":{}}]})).await.unwrap();
     let d: Vec<u64> = mock.requests().iter().map(|r| r.2["_meta"]["deadline_ms"].as_u64().unwrap()).collect();
-    assert_eq!(d, vec![2100, 7000, 5250, 6000, 60_000]);
+    // capture: settle bound (default DEFAULT_SETTLE_TIMEOUT_MS, at most MAX_SETTLE_TIMEOUT_MS) + 5 s
+    assert_eq!(d, vec![2100, 7000, 5250, DEFAULT_SETTLE_TIMEOUT_MS + 5000, MAX_SETTLE_TIMEOUT_MS + 5000, 60_000]);
 }
 
 #[tokio::test]

@@ -28,16 +28,13 @@ use gtk4 as gtk;
 use gtk4::prelude::*;
 use gtk4::{gdk, graphene, gsk, pango};
 use gtk_mcp_protocol::{
-    AgentError, Annotation, CaptureParams, CaptureResponse, CaptureResult, ErrorCode, MAX_FRAME_BYTES,
+    AgentError, Annotation, CaptureParams, CaptureResponse, CaptureResult, DEFAULT_SETTLE_TIMEOUT_MS, ErrorCode,
+    MAX_FRAME_BYTES, MAX_SETTLE_TIMEOUT_MS,
 };
 use serde_json::Value;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// Plan 5.3 says 1000 ms. Spike S2 measured consecutive frames ~975-1000 ms
-/// apart under compositor frame-callback throttling, so 1000 ms would time out
-/// right at the throttle; callers may still pass any `settle_timeout_ms`.
-pub const DEFAULT_SETTLE_TIMEOUT_MS: u64 = 2000;
 const MAX_ANNOTATIONS: usize = 60;
 const MAX_SCALE: f64 = 8.0;
 const MAX_SIDE_PX: f64 = 16384.0;
@@ -241,7 +238,7 @@ pub async fn capture_widget(
             }
         };
         request_frame();
-        let mut budget = Duration::from_millis(settle_timeout_ms);
+        let mut budget = Duration::from_millis(settle_timeout_ms.min(MAX_SETTLE_TIMEOUT_MS));
         if let Some(rem) = ctx.remaining() {
             // Keep a quarter of the remaining deadline for rendering.
             budget = budget.min(rem * 3 / 4);

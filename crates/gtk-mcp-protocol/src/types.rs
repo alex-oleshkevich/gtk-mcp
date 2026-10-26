@@ -306,6 +306,13 @@ pub struct BatchParams {
     pub stop_on_error: Option<bool>,
 }
 
+/// Default `capture` settle bound. Plan 5.3 says 1000 ms; spike S2 measured
+/// compositor-throttled frames ~975-1000 ms apart, so 1000 ms would time out
+/// right at the throttle.
+pub const DEFAULT_SETTLE_TIMEOUT_MS: u64 = 2000;
+/// Larger `settle_timeout_ms` values are clamped to this.
+pub const MAX_SETTLE_TIMEOUT_MS: u64 = 60_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CaptureParams {
     #[serde(default)]

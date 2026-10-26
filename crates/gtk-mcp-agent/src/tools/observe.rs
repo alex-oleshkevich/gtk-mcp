@@ -3,11 +3,11 @@
 //! already succeeded when this runs, so a failed observation is reported next
 //! to the mutation result and never retried.
 
-use super::capture::{DEFAULT_SETTLE_TIMEOUT_MS, capture_widget};
+use super::capture::capture_widget;
 use super::snapshot::{self, Limits};
 use crate::agent::{Agent, Ctx};
 use gtk4 as gtk;
-use gtk_mcp_protocol::{AgentError, Observe, SnapshotView};
+use gtk_mcp_protocol::{AgentError, DEFAULT_SETTLE_TIMEOUT_MS, Observe, SnapshotView};
 use serde_json::{Map, Value, json};
 use std::rc::Rc;
 
