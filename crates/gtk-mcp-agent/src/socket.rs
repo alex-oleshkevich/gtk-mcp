@@ -23,6 +23,8 @@ pub struct Conn {
     pub id: u64,
     tx: mpsc::Sender<Vec<u8>>,
     inflight: Arc<Mutex<HashMap<u64, Arc<AtomicBool>>>>,
+    /// Set by the read thread when the peer is gone, before `Disconnect` is queued.
+    closed: Arc<AtomicBool>,
 }
 
 impl Conn {
@@ -64,13 +66,28 @@ impl Conn {
     pub fn forget(&self, id: u64) {
         self.inflight.lock().unwrap().remove(&id);
     }
+
+    /// The peer disconnected: nothing sent here is read any more.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
 }
 
 #[cfg(test)]
 impl Conn {
     /// A connection whose peer is gone (unit tests of handlers).
     pub(crate) fn detached(id: u64) -> Self {
-        Conn { id, tx: mpsc::channel().0, inflight: Arc::default() }
+        Conn { id, tx: mpsc::channel().0, inflight: Arc::default(), closed: Arc::new(AtomicBool::new(true)) }
+    }
+
+    /// An open connection and the frames written to it (unit tests).
+    pub(crate) fn open(id: u64) -> (Self, mpsc::Receiver<Vec<u8>>) {
+        let (tx, rx) = mpsc::channel();
+        (Conn { id, tx, inflight: Arc::default(), closed: Arc::default() }, rx)
+    }
+
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
     }
 }
 
@@ -163,7 +180,7 @@ fn serve(conn_id: u64, stream: UnixStream, tx: async_channel::Sender<Incoming>) 
     let Ok(write_half) = stream.try_clone() else { return };
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
     let inflight: Arc<Mutex<HashMap<u64, Arc<AtomicBool>>>> = Arc::default();
-    let conn = Conn { id: conn_id, tx: out_tx, inflight: inflight.clone() };
+    let conn = Conn { id: conn_id, tx: out_tx, inflight: inflight.clone(), closed: Arc::default() };
 
     let _ = std::thread::Builder::new().name("gtk-mcp-write".into()).spawn(move || {
         let mut w = write_half;
@@ -226,6 +243,9 @@ fn serve(conn_id: u64, stream: UnixStream, tx: async_channel::Sender<Incoming>) 
                 },
             }
         }
+        // Mark the connection closed before `Disconnect` is queued, so state
+        // registered for it afterwards (the log hub) sees it is gone.
+        conn.closed.store(true, Ordering::SeqCst);
         for flag in inflight.lock().unwrap().values() {
             flag.store(true, Ordering::SeqCst);
         }
@@ -330,5 +350,19 @@ mod tests {
         assert!(matches!(s.read(&mut buf), Ok(0) | Err(_)));
         assert!(rx.try_recv().is_err());
         h.cleanup();
+    }
+
+    /// gm-n4j: a result nested deeper than the broker can parse is answered
+    /// with an error carrying the request id, never sent as an unparsable frame.
+    #[test]
+    fn too_deeply_nested_result_becomes_an_error_for_its_id() {
+        let (conn, rx) = Conn::open(1);
+        let deep = (0..gtk_mcp_protocol::MAX_FRAME_NESTING).fold(json!(1), |v, _| json!([v]));
+        conn.respond(9, Ok(deep));
+        let line = rx.try_recv().expect("an answer was sent");
+        let v: Value = serde_json::from_slice(&line).unwrap();
+        assert_eq!(v["id"], 9);
+        assert_eq!(v["error"]["data"]["code"], "invalid_value");
+        assert!(v["error"]["message"].as_str().unwrap().contains("levels deep"), "{v}");
     }
 }

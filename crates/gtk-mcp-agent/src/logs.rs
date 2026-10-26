@@ -44,9 +44,12 @@ pub fn used() -> bool {
 }
 
 /// A broker connected: it receives everything forwarded while none was.
+/// A connection that is already gone is not registered: its `Disconnect` may
+/// have been handled before its `hello` ran, and it would keep the records
+/// that belong in the backlog.
 pub fn register_conn(conn: &Conn) {
     let mut h = hub();
-    if h.conns.iter().any(|c| c.id == conn.id) {
+    if conn.is_closed() || h.conns.iter().any(|c| c.id == conn.id) {
         return;
     }
     h.conns.push(conn.clone());
@@ -115,6 +118,7 @@ pub fn forward_log(level: LogLevel, fields: &[LogField<'_>]) {
         "time_ms": time_ms,
     });
     let mut h = hub();
+    h.conns.retain(|c| !c.is_closed());
     if h.conns.is_empty() {
         if h.backlog.len() == BACKLOG {
             h.backlog.pop_front();
@@ -124,5 +128,40 @@ pub fn forward_log(level: LogLevel, fields: &[LogField<'_>]) {
         for c in &h.conns {
             c.notify(method::LOG, rec.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(msg: &str) {
+        forward_log(LogLevel::Warning, &[LogField::new(glib::gstr!("MESSAGE"), msg.as_bytes())]);
+    }
+
+    /// gm-cum: a connection whose disconnect was handled before its `hello`
+    /// ran must not capture the forwarded records; they stay in the backlog
+    /// and reach the next broker.
+    #[test]
+    fn a_closed_connection_never_takes_the_backlog() {
+        activate();
+        let (dead, dead_rx) = Conn::open(9001);
+        dead.close();
+        register_conn(&dead);
+        record("kept for the next broker");
+        assert!(dead_rx.try_recv().is_err(), "nothing was sent to the dead connection");
+
+        // A connection that closes after registering stops receiving too.
+        let (live, live_rx) = Conn::open(9002);
+        register_conn(&live);
+        assert!(String::from_utf8(live_rx.try_recv().unwrap()).unwrap().contains("kept for the next broker"));
+        live.close();
+        record("after the close");
+        assert!(live_rx.try_recv().is_err());
+
+        let (next, next_rx) = Conn::open(9003);
+        register_conn(&next);
+        assert!(String::from_utf8(next_rx.try_recv().unwrap()).unwrap().contains("after the close"));
+        unregister_conn(9003);
     }
 }

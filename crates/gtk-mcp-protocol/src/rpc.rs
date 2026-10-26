@@ -221,14 +221,54 @@ impl<R: BufRead> FrameReader<R> {
     }
 }
 
+/// Deepest array/object nesting a frame may have: the peer parses with
+/// serde_json, whose recursion limit accepts 127 levels and rejects deeper
+/// frames without recovering their `id`.
+pub const MAX_FRAME_NESTING: usize = 127;
+
+/// Deepest array/object nesting of serialized JSON.
+fn nesting(json: &[u8]) -> usize {
+    let (mut depth, mut max, mut in_str, mut esc) = (0usize, 0usize, false, false);
+    for &b in json {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'[' | b'{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
+
 /// Serialize `msg` as one line. Fails with `InvalidData` when the frame would
-/// exceed `MAX_FRAME_BYTES`, so callers can answer with an error instead.
+/// exceed `MAX_FRAME_BYTES` or nest deeper than `MAX_FRAME_NESTING` (the peer
+/// could not parse it), so callers can answer with an error instead.
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
     let mut bytes = serde_json::to_vec(msg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     if bytes.len() > MAX_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("frame of {} bytes exceeds the {} byte cap", bytes.len(), MAX_FRAME_BYTES),
+        ));
+    }
+    let depth = nesting(&bytes);
+    if depth > MAX_FRAME_NESTING {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame nests {depth} levels deep; the limit is {MAX_FRAME_NESTING}"),
         ));
     }
     bytes.push(b'\n');

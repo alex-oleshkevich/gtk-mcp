@@ -299,6 +299,33 @@ fn real_cap_rejects_oversized_frames() {
     assert!(sink.is_empty());
 }
 
+/// gm-n4j: a frame the peer cannot parse (serde_json stops at 128 levels) is
+/// refused when written, so the writer answers with an error instead of
+/// leaving the call to hang until its deadline.
+#[test]
+fn write_frame_refuses_frames_nested_beyond_the_parse_limit() {
+    fn nested(levels: usize) -> Value {
+        (0..levels).fold(json!("[{\"x\": \"}]]]"), |v, _| json!([v]))
+    }
+    // The response envelope adds one level: result at 126 levels is 127 in total.
+    let ok = Response::ok(7, nested(MAX_FRAME_NESTING - 1));
+    let mut buf = Vec::new();
+    write_frame(&mut buf, &ok).unwrap();
+    match parse_message(&buf).unwrap() {
+        Message::Response(r) => assert_eq!(r, ok),
+        other => panic!("{other:?}"),
+    }
+    let deep = Response::ok(7, nested(MAX_FRAME_NESTING));
+    let mut sink = Vec::new();
+    let e = write_frame(&mut sink, &deep).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+    assert!(e.to_string().contains("128 levels"), "{e}");
+    assert!(sink.is_empty());
+    // Unchecked, the peer cannot parse it and cannot recover the id either.
+    let raw = serde_json::to_vec(&deep).unwrap();
+    assert!(matches!(parse_message(&raw), Err((None, _))));
+}
+
 #[test]
 fn snapshot_text_matches_json_hierarchy() {
     let snap = json!({
