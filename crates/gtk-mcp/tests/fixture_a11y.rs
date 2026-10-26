@@ -170,7 +170,7 @@ fn broker(fx: &Fixture, bus: &PrivateBus, atspi: bool, mutations: bool) -> Clien
     let policy = Policy {
         allow_mutations: mutations,
         allow_atspi: atspi,
-        toolsets: vec!["core".into(), "a11y".into()],
+        toolsets: vec!["core".into(), "a11y".into(), "diagnostics".into()],
         ..Policy::default()
     };
     let mut config = Config::with_socket_dir(fx.dir.path());
