@@ -81,6 +81,8 @@ agent linked by glimpse binaries behind a Cargo feature, and 56 MCP tools.
 | A frame clock may stop ticking for hidden/occluded Wayland surfaces | assumed → spike S2 |
 | GTK's accessible tree and its AT-SPI export can be joined by parallel structural walk | assumed → spike S3 |
 | `GtkEventControllerLegacy` in capture phase on each toplevel observes all input events for attribution | assumed → spike S4 |
+| A `glib::spawn_future_local` executor fed by an `async_channel` from a plain thread delivers requests queued before `RelmApp::run` (served once the loop starts, ~7 ms after the send in the spike), during `run`, and none are handled on the sending thread (every handler observed `on_main=true`) | measured (spike S1, `spikes/s1-executor`, relm4 0.11, 2026-10-26) |
+| relm4's post-run `MainContext::iteration(true)` does **not** wait for requests that arrive after `run` returned: a request sent 300 ms after `run()` returned was dispatched only by an explicit `iteration(false)` from the host. §4.2 already says the executor "runs only while the main loop iterates"; requests after `run` returns time out as `target_unresponsive` (`started: false`). No design change | measured (spike S1) |
 
 ## 4. Architecture
 

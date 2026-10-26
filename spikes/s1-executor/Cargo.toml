@@ -1,0 +1,12 @@
+[package]
+name = "s1-executor"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Throwaway spike; deliberately not part of the gtk-mcp workspace.
+[workspace]
+
+[dependencies]
+relm4 = { version = "0.11", features = ["libadwaita"] }
+async-channel = "2.5"

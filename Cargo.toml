@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/gtk-mcp-protocol",
+    "crates/gtk-mcp-agent",
+    "crates/gtk-mcp",
+    "crates/gtk-mcp-fixture",
+    "crates/gtk-mcp-agent-capi",
+]
+# The C ABI crate is a placeholder until M7.
+default-members = [
+    "crates/gtk-mcp-protocol",
+    "crates/gtk-mcp-agent",
+    "crates/gtk-mcp",
+    "crates/gtk-mcp-fixture",
+]
+exclude = ["spikes"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+thiserror = "2"
+anyhow = "1"
+libc = "0.2"
+gtk4 = { version = "0.11", features = ["v4_10"] }
+glib = "0.22"
+gio = "0.22"
+async-channel = "2.5"
+gtk-mcp-protocol = { path = "crates/gtk-mcp-protocol" }
+gtk-mcp-agent = { path = "crates/gtk-mcp-agent" }
