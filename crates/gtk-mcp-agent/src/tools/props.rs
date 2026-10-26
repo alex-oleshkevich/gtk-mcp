@@ -96,16 +96,14 @@ pub fn get_property(agent: &Rc<Agent>, p: GetPropertyParams) -> Result<Value, Ag
     Ok(json!({"target": agent.registry.ref_for(&obj), "values": values}))
 }
 
-/// Adapter to the `observe` module. The parent replaces the body by
-/// `crate::tools::observe::observe(agent, w, obs, ctx).await`.
+/// Post-mutation observation (`observe` parameter).
 async fn observe_hook(
     agent: &Rc<Agent>,
     w: &gtk::Widget,
     obs: &Observe,
     ctx: &Ctx,
 ) -> (Option<Value>, Option<AgentError>) {
-    let _ = (agent, w, obs, ctx);
-    (None, Some(AgentError::new(ErrorCode::UnsupportedOperation, "observe not available")))
+    crate::tools::observe::observe(agent, w, obs, ctx).await
 }
 
 pub async fn set_property(agent: &Rc<Agent>, p: SetPropertyParams, ctx: &Ctx) -> Result<Value, AgentError> {

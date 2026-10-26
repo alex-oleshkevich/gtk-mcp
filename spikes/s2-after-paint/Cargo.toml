@@ -1,0 +1,13 @@
+[package]
+name = "s2-after-paint"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Excluded from the main workspace (spike S2, plan 3.2 / 10).
+[workspace]
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }
+glib = "0.22"
+async-channel = "2.5"

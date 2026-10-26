@@ -225,6 +225,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     columns.append_column(&gtk::ColumnViewColumn::new(Some("Name"), Some(words_factory)));
     root.append(&columns);
 
+    build_interact_extras(&root);
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&root));
     scroll.set_vexpand(true);
@@ -280,4 +281,219 @@ fn main() -> glib::ExitCode {
         win.present();
     });
     app.run()
+}
+
+// ---------------------------------------------------------------------------
+// Additions for `interact` / `inspect_text` / `edit_text` / `capture` tests.
+// ---------------------------------------------------------------------------
+
+mod fixture_media {
+    //! A tiny in-memory `GtkMediaStream` (no backend needed): 10 s, seekable.
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use gtk4 as gtk;
+    use gtk4::{gdk, glib};
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct FixtureStream;
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for FixtureStream {
+            const NAME: &'static str = "GtkMcpFixtureStream";
+            type Type = super::FixtureStream;
+            type ParentType = gtk::MediaStream;
+            type Interfaces = (gdk::Paintable,);
+        }
+
+        impl ObjectImpl for FixtureStream {
+            fn constructed(&self) {
+                self.parent_constructed();
+                #[allow(deprecated)]
+                self.obj().prepared(false, true, true, 10_000_000);
+            }
+        }
+        impl PaintableImpl for FixtureStream {
+            fn snapshot(&self, _snapshot: &gdk::Snapshot, _width: f64, _height: f64) {}
+        }
+        impl MediaStreamImpl for FixtureStream {
+            fn play(&self) -> bool {
+                true
+            }
+            fn pause(&self) {}
+            fn seek(&self, timestamp: i64) {
+                let obj = self.obj();
+                obj.seek_success();
+                obj.update(timestamp);
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct FixtureStream(ObjectSubclass<imp::FixtureStream>)
+            @extends gtk::MediaStream, @implements gdk::Paintable;
+    }
+
+    impl FixtureStream {
+        pub fn new() -> Self {
+            glib::Object::new()
+        }
+    }
+}
+
+fn build_interact_extras(root: &gtk::Box) {
+    // Spin button, notebook, list box with activatable rows.
+    let spin = named(gtk::SpinButton::with_range(0.0, 10.0, 1.0), "quantity");
+    spin.set_value(3.0);
+    root.append(&spin);
+
+    let notebook = named(gtk::Notebook::new(), "notebook");
+    notebook.append_page(&gtk::Label::new(Some("Notebook one")), Some(&gtk::Label::new(Some("One"))));
+    notebook.append_page(&gtk::Label::new(Some("Notebook two")), Some(&gtk::Label::new(Some("Two"))));
+    root.append(&notebook);
+
+    let rows = named(gtk::ListBox::new(), "rows-list");
+    for (i, name) in ["row-one", "row-two", "row-three"].iter().enumerate() {
+        let row = named(gtk::ListBoxRow::new(), name);
+        row.set_child(Some(&gtk::Label::new(Some(&format!("Row {}", i + 1)))));
+        rows.append(&row);
+    }
+    root.append(&rows);
+
+    // libadwaita rows (GType names only on the agent side).
+    let adw_list = gtk::ListBox::new();
+    adw_list.add_css_class("boxed-list");
+    adw_list.set_selection_mode(gtk::SelectionMode::None);
+    let switch_row = named(adw::SwitchRow::new(), "adw-switch-row");
+    switch_row.set_title("Adw switch");
+    adw_list.append(&switch_row);
+    let combo_row = named(adw::ComboRow::new(), "adw-combo-row");
+    combo_row.set_title("Adw combo");
+    combo_row.set_model(Some(&gtk::StringList::new(&["Red", "Green", "Blue"])));
+    adw_list.append(&combo_row);
+    let expander_row = named(adw::ExpanderRow::new(), "adw-expander-row");
+    expander_row.set_title("Adw expander");
+    expander_row.add_row(&adw::ActionRow::builder().title("Inner row").build());
+    adw_list.append(&expander_row);
+    let entry_row = named(adw::EntryRow::new(), "adw-entry-row");
+    entry_row.set_title("Adw entry");
+    entry_row.set_text("entry row text");
+    adw_list.append(&entry_row);
+    let spin_row = named(
+        adw::SpinRow::new(Some(&gtk::Adjustment::new(5.0, 0.0, 20.0, 1.0, 5.0, 0.0)), 1.0, 0),
+        "adw-spin-row",
+    );
+    spin_row.set_title("Adw spin");
+    adw_list.append(&spin_row);
+    root.append(&adw_list);
+
+    let view_stack = named(adw::ViewStack::new(), "adw-stack");
+    view_stack.add_titled(&gtk::Label::new(Some("View one")), Some("one"), "One");
+    view_stack.add_titled(&gtk::Label::new(Some("View two")), Some("two"), "Two");
+    root.append(&view_stack);
+
+    // Read-only and insensitive widgets (error paths).
+    let ro = named(gtk::Entry::new(), "readonly-entry");
+    ro.set_text("read only");
+    ro.set_editable(false);
+    root.append(&ro);
+    let disabled = named(gtk::Button::with_label("Disabled"), "disabled-button");
+    disabled.set_sensitive(false);
+    root.append(&disabled);
+
+    // Text view with tags.
+    let tagged = named(gtk::TextView::new(), "tagged-notes");
+    let buf = tagged.buffer();
+    buf.set_text("Bold start, italic middle\nsecond line");
+    let bold = gtk::TextTag::builder().name("bold").weight(700).build();
+    let italic = gtk::TextTag::builder().name("italic").style(gtk::pango::Style::Italic).build();
+    buf.tag_table().add(&bold);
+    buf.tag_table().add(&italic);
+    buf.apply_tag(&bold, &buf.iter_at_offset(0), &buf.iter_at_offset(4));
+    buf.apply_tag(&italic, &buf.iter_at_offset(12), &buf.iter_at_offset(18));
+    buf.apply_tag(&bold, &buf.iter_at_offset(26), &buf.iter_at_offset(32));
+    root.append(&tagged);
+
+    // Reveals / hides the password entry's text like its peek icon does (the
+    // icon itself is not reachable through semantic interactions).
+    let peek = named(gtk::ToggleButton::with_label("Peek password"), "peek-toggle");
+    {
+        let root = root.clone();
+        peek.connect_toggled(move |b| {
+            let mut c = root.first_child();
+            while let Some(w) = c {
+                if w.widget_name() == "password" {
+                    if let Some(t) = w.downcast_ref::<gtk::PasswordEntry>().and_then(|p| p.delegate()).and_downcast::<gtk::Text>() {
+                        t.set_visibility(b.is_active());
+                    }
+                    break;
+                }
+                c = w.next_sibling();
+            }
+        });
+    }
+    root.append(&peek);
+
+    // Grid view and column view over small models (select / scroll_to adapters).
+    let grid_model = gtk::StringList::new(&["g0", "g1", "g2", "g3", "g4", "g5"]);
+    let grid_factory = gtk::SignalListItemFactory::new();
+    grid_factory.connect_setup(|_, item| {
+        item.downcast_ref::<gtk::ListItem>().unwrap().set_child(Some(&gtk::Label::new(None)));
+    });
+    grid_factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let s = item.item().and_downcast::<gtk::StringObject>().unwrap();
+        item.child().and_downcast::<gtk::Label>().unwrap().set_label(&s.string());
+    });
+    let grid = named(gtk::GridView::new(Some(gtk::SingleSelection::new(Some(grid_model.clone()))), Some(grid_factory.clone())), "items-grid");
+    root.append(&grid);
+    let columns = named(gtk::ColumnView::new(Some(gtk::SingleSelection::new(Some(grid_model)))), "items-columns");
+    columns.append_column(&gtk::ColumnViewColumn::new(Some("Name"), Some(grid_factory)));
+    root.append(&columns);
+
+    // Media: a backend-free stream on a GtkVideo.
+    let video = named(gtk::Video::new(), "media-video");
+    video.set_media_stream(Some(&fixture_media::FixtureStream::new()));
+    root.append(&video);
+    root.append(&named(gtk::Video::new(), "media-empty"));
+
+    // Popover with custom content (popup / popdown on a plain GtkPopover owner).
+    let custom = named(gtk::MenuButton::new(), "custom-popover-button");
+    custom.set_label("Custom popover");
+    let pop = gtk::Popover::new();
+    pop.set_child(Some(&named(gtk::Label::new(Some("Popover content")), "popover-label")));
+    custom.set_popover(Some(&pop));
+    root.append(&custom);
+
+    // Second toplevel window to close.
+    let open_second = named(gtk::Button::with_label("Open second window"), "open-second-window");
+    open_second.connect_clicked(|b| {
+        let win = gtk::Window::builder().title("Second window").default_width(240).default_height(120).build();
+        win.set_widget_name("second-window");
+        win.set_child(Some(&gtk::Label::new(Some("I can be closed"))));
+        if let Some(parent) = b.root().and_downcast::<gtk::Window>() {
+            win.set_transient_for(Some(&parent));
+        }
+        win.present();
+    });
+    root.append(&open_second);
+
+    // Scrolling: nested scrolled windows and a far-away label.
+    let inner_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    spacer.set_size_request(10, 400);
+    inner_box.append(&spacer);
+    inner_box.append(&named(gtk::Label::new(Some("inner far label")), "inner-far-label"));
+    let inner = named(gtk::ScrolledWindow::new(), "inner-scroll");
+    inner.set_min_content_height(80);
+    inner.set_max_content_height(80);
+    inner.set_child(Some(&inner_box));
+    root.append(&inner);
+
+    let tall = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    tall.set_size_request(10, 900);
+    root.append(&tall);
+    root.append(&named(gtk::Label::new(Some("far away")), "far-label"));
 }

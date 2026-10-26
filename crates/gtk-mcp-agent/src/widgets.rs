@@ -288,8 +288,15 @@ pub fn capabilities(w: &gtk::Widget) -> Vec<&'static str> {
     if w.is::<gtk::TextView>() {
         add("fill");
     }
-    if w.is::<gtk::Range>() || w.is::<gtk::SpinButton>() {
+    if w.is::<gtk::Range>() || w.is::<gtk::SpinButton>() || is_type_name(w, "AdwSpinRow") {
         add("set_value");
+    }
+    if w.downcast_ref::<gtk::ListBoxRow>().is_some_and(|r| r.is_activatable())
+        || w.is::<gtk::Entry>()
+        || w.is::<gtk::PasswordEntry>()
+        || w.is::<gtk::SearchEntry>()
+    {
+        add("activate");
     }
     if w.is::<gtk::DropDown>() || is_type_name(w, "AdwComboRow") || w.is::<gtk::ListBox>() {
         add("select");
@@ -316,7 +323,7 @@ pub fn capabilities(w: &gtk::Widget) -> Vec<&'static str> {
         add("select");
         add("scroll_to");
     }
-    if w.is_focusable() {
+    if w.is_focusable() || w.dynamic_cast_ref::<gtk::Editable>().is_some() {
         add("focus");
     }
     if !w.is::<gtk::Window>() {
