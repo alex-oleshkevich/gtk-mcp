@@ -268,6 +268,47 @@ async fn secrets_never_leave_the_agent() {
     }
 }
 
+/// gm-ef6: the `last_frame` fallback must never serve a frame painted while a
+/// secret field was peeking. Sequence: capture the window (its paintable is
+/// remembered and keeps following paints), peek (plaintext paints), un-peek
+/// (visibility=false again, so `check_target` passes), then capture before
+/// the next paint. Both fallback paths (`settle:false` on a dirty widget and
+/// `settle:true` timing out with no frame) must fail `capture_unavailable`
+/// instead of returning the remembered peeking frame; a later settled
+/// capture succeeds with a fresh (bulleted) frame. The captures are issued
+/// immediately after un-peeking, well inside one compositor frame interval
+/// (spike S2: ~1 s under nested-niri throttling), so the widget is still
+/// dirty and the fallback is the path under test.
+#[tokio::test(flavor = "multi_thread")]
+async fn capture_after_peek_off_never_serves_the_peeking_frame() {
+    let display = require_display!();
+    let fx = Fixture::start(&display, true, &[]);
+    let c = rw(&fx);
+    c.json("interact", json!({"target": by_id("password"), "operation": "fill", "text": SECRET})).await;
+    let win = c.json("list_windows", json!({})).await["windows"][0]["ref"].clone();
+    // Remember the window's paintable via a normal settled capture.
+    c.call("capture", json!({"target": win})).await.unwrap();
+
+    for args in [
+        json!({"target": win, "settle": false}),
+        json!({"target": win, "settle": true, "settle_timeout_ms": 0}),
+    ] {
+        // Peek and give the compositor a frame interval to paint plaintext
+        // into the remembered paintable.
+        c.json("interact", json!({"target": by_id("peek-toggle"), "operation": "set_active", "active": true})).await;
+        tokio::time::sleep(Duration::from_millis(1600)).await;
+        let e = c.err("capture", json!({"target": win})).await;
+        assert_eq!(e.code, ErrorCode::Redacted, "capture while peeking must stay refused");
+        // Un-peek: visibility=false, widget dirty, no fresh paint yet.
+        c.json("interact", json!({"target": by_id("peek-toggle"), "operation": "set_active", "active": false})).await;
+        let e = c.err("capture", args.clone()).await;
+        assert_eq!(e.code, ErrorCode::CaptureUnavailable, "capture {args} after peek-off must not serve the peeking frame: {e:?}");
+        // A settled capture still succeeds once a fresh frame paints.
+        let ok = c.call("capture", json!({"target": win})).await.unwrap();
+        assert_eq!(ok.json_content().unwrap()["stale"], false);
+    }
+}
+
 // ---- AC-8 --------------------------------------------------------------------
 
 fn short_deadline_broker(fx: &Fixture, ms: u64) -> Arc<Broker> {

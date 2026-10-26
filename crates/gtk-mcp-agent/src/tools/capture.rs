@@ -12,7 +12,10 @@
 //! `after-paint` that follows this request, bounded by `settle_timeout_ms`. No
 //! frame in time: render the last frame an earlier capture saw with
 //! `stale: true, stale_reason: "no_frame"`, or fail `capture_unavailable` when
-//! there is none. S2 showed `after-paint` fires for covered, unfocused and
+//! there is none. The last-frame fallback is never served when the target
+//! subtree contains a secret `Entry`/`Text`: that frame may have been painted
+//! while the field was peeking, even if it is no longer peeking now.
+//! S2 showed `after-paint` fires for covered, unfocused and
 //! off-workspace windows, and never for unmapped ones (`target_unmapped`), so
 //! `no_frame` means a throttled or frozen frame clock, not occlusion.
 
@@ -131,6 +134,37 @@ fn last_frame(w: &gtk::Widget) -> Option<gtk::WidgetPaintable> {
     })
 }
 
+/// Does the subtree rooted at `w` (inclusive) contain a secret `Entry`/`Text`,
+/// whatever its current visibility? Mirrors the widget test in
+/// `secrecy::subtree_peeking`, without judging whether it is revealing now.
+fn subtree_has_secret(w: &gtk::Widget) -> bool {
+    if (w.is::<gtk::Entry>() || w.is::<gtk::Text>()) && secrecy::is_secret(w) {
+        return true;
+    }
+    let mut c = w.first_child();
+    while let Some(child) = c {
+        if subtree_has_secret(&child) {
+            return true;
+        }
+        c = child.next_sibling();
+    }
+    false
+}
+
+/// The frame the fallback may serve for `w`. Never the remembered frame when
+/// the subtree contains a secret field: the remembered paintable follows the
+/// widget's paints, so it may hold a frame painted while the field was
+/// peeking, even though `check_target` (current visibility) passes now.
+/// Callers turn `None` into `capture_unavailable`, i.e. a fresh frame is the
+/// only acceptable image for such targets.
+fn fallback_frame(w: &gtk::Widget) -> Option<gtk::WidgetPaintable> {
+    if subtree_has_secret(w) {
+        None
+    } else {
+        last_frame(w)
+    }
+}
+
 /// Does GTK hold a render node for the paintable's widget right now?
 fn has_render_data(paintable: &gtk::WidgetPaintable) -> bool {
     let s = gtk::Snapshot::new();
@@ -229,7 +263,7 @@ pub async fn capture_widget(
         if stale {
             // Changes are pending and no frame came: the best available image
             // is the last one an earlier capture saw.
-            source = last_frame(w).ok_or_else(|| {
+            source = fallback_frame(w).ok_or_else(|| {
                 AgentError::new(
                     ErrorCode::CaptureUnavailable,
                     "no frame was painted within the settle timeout and there is no earlier frame of this widget",
@@ -243,7 +277,7 @@ pub async fn capture_widget(
         stale = true;
         stale_reason = Some("settle_disabled".to_string());
     } else {
-        source = last_frame(w).ok_or_else(|| {
+        source = fallback_frame(w).ok_or_else(|| {
             AgentError::new(
                 ErrorCode::CaptureUnavailable,
                 "the widget has pending changes and no earlier frame; capture with settle=true",
