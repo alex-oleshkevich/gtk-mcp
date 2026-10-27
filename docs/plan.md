@@ -1,35 +1,36 @@
-# gtk-mcp — Final Plan
+# gtk-mcp: final plan
 
-Status: final, reviewed 2026-10-26. Authoritative over `tools.md`,
-`widget-tree.md`, and `embedding.md` where they disagree; those documents were
-updated in the same pass and must stay consistent with this one.
+Status: final, reviewed 2026-10-26. If this plan and `tools.md`,
+`widget-tree.md` or `embedding.md` disagree, this plan wins. Those documents
+were updated in the same pass and must stay consistent with it.
 
 ## 1. Goal and boundary
 
-An MCP server that lets a coding agent inspect, exercise, render, and diagnose
-a running GTK4 / libadwaita application **from inside the application
-process**.
+gtk-mcp is an MCP server. It lets a coding agent inspect, use, render and
+diagnose a running GTK4 / libadwaita app **from inside the app's process**.
 
 | Owned by `gtk-mcp` | Owned by `../wayland-mcp` |
 |---|---|
 | Widget tree, GObject properties/signals, actions, menus, shortcuts, models, layout, CSS, GTK rendering, GTK settings, GSettings, GResources, GApplication open/activate, accessibility linked to widgets | Real keyboard/pointer/touch input, desktop screenshots, OCR, window placement, compositor state, clipboard (data-control), nested compositor sandboxes |
 
-`gtk-mcp` never injects input and never captures the desktop. When both
-servers are configured, they cooperate only through the app process:
-`wayland-mcp app_launch` of an app with the agent compiled in produces a session `gtk-mcp`
-discovers on its own.
+`gtk-mcp` never fakes input and never captures the desktop. When both
+servers are set up, they only meet through the app process: if
+`wayland-mcp app_launch` starts an app with the agent compiled in, `gtk-mcp`
+finds that session by itself.
 
 ## 2. Current state
 
-- `/home/alex/projects/gtk-mcp/` contains only `docs/` (this plan,
+When this plan was written:
+
+- `/home/alex/projects/gtk-mcp/` held only `docs/` (this plan,
   `tools.md`, `widget-tree.md`, `embedding.md`). No code, no git repository.
-- `/home/alex/projects/wayland-mcp/` is an existing Rust MCP server (rmcp,
-  stdio) whose conventions this plan reuses (section 4.1).
-- Primary consumer: `/home/alex/projects/glimpse` (Rust workspace; GTK 4.22,
+- `/home/alex/projects/wayland-mcp/` was an existing Rust MCP server (rmcp,
+  stdio). This plan reuses its conventions (section 4.1).
+- The main user is `/home/alex/projects/glimpse` (Rust workspace; GTK 4.22,
   libadwaita 1.9, relm4 0.11).
 
-This plan adds: a Cargo workspace with five crates (section 6), an embedded
-agent linked by glimpse binaries behind a Cargo feature, and 56 MCP tools.
+The plan adds a Cargo workspace with five crates (section 6), an embedded
+agent that glimpse binaries link behind a Cargo feature, and 56 MCP tools.
 
 ## 3. Dependency discovery
 
@@ -57,8 +58,9 @@ agent linked by glimpse binaries behind a Cargo feature, and 56 MCP tools.
 
 ### 3.2 Remote dependencies
 
-`measured` = checked today against source, registry, or docs.gtk.org.
-`assumed` = reasoned, not exercised; each has a spike in section 10.
+`measured` = checked on the review date against source, the crate registry
+or docs.gtk.org. `assumed` = reasoned through but not tried; each one has a
+spike (a small throwaway experiment) in section 10.
 
 | Fact | Status |
 |---|---|
@@ -78,8 +80,8 @@ agent linked by glimpse binaries behind a Cargo feature, and 56 MCP tools.
 | Also present: `gtk_shortcut_action_activate`, `gtk_widget_class_query_action`, `pango_layout_is_ellipsized`, `gtk_label_get_layout`, `g_type_get_instance_count`, `gtk_widget_child_focus`, `g_application_get_is_busy`, `gtk_widget_observe_controllers`, `gdk_frame_clock_get_timings`, `g_resources_enumerate_children`, `gtk_window_get_toplevels` | measured (review, sys crates) |
 | rmcp latest stable 3.7.0 | measured (crates.io, updated 2026-10-22) |
 | Synchronous AT-SPI self-call from the app main thread would deadlock | assumed → avoided by design (AT-SPI in broker) |
-| A frame clock may stop ticking for hidden/occluded Wayland surfaces | measured (spike S2, nested niri 26.04): `after-paint` after `queue_draw()` fires for visible-focused, fully covered, unfocused and off-workspace windows (6/6 within 1 s, 0.6–17 ms idle); an unmapped (`set_visible(false)`) window never paints (0/3). niri has no minimized state. Consecutive frames in a burst are ~0.98 s apart (frame-callback throttling), so a second capture right after a commit can miss a 1000 ms window |
-| `GtkEventControllerLegacy` in capture phase on each toplevel observes input for attribution | measured (spike S4, `spikes/s4-input-attribution`, nested niri 26.04, real input from wayland-mcp virtual pointer/keyboard, 2026-10-26): the toplevel's capture controller sees `ButtonPress/Release`, `Motion`, `KeyPress/Release` for widgets inside the window. Emissions follow the last input event by 0.1–1.3 ms (typed text → `GtkEditable::changed`), 0.2–0.6 ms (button click: `clicked` fires on release, after the controller saw it) and ~100 ms (`GtkSwitch::state-set`, animated). **Popovers are separate natives**: key presses and clicks inside an open popover menu reach only a controller installed on the popover (`popover KeyPress` logged, nothing on the window), so the controller must be added to every `GtkPopover` too. **Limits of the 300 ms rule**: an app emission that happens to fall within 300 ms after real input is attributed `human` (observed once: an app timer 230 ms after a switch click); the window is a heuristic. Driving note: a long-lived wayland-mcp server delivered only its first virtual-pointer click in the nested niri (output `Flipped180`, 1433×1745); a fresh server per click delivered all of them; key input was unaffected |
+| A frame clock may stop ticking for hidden/occluded Wayland surfaces | measured (spike S2, nested niri 26.04): `after-paint` after `queue_draw()` fires for visible-focused, fully covered, unfocused and off-workspace windows (6/6 within 1 s, 0.6 to 17 ms idle); an unmapped (`set_visible(false)`) window never paints (0/3). niri has no minimized state. Consecutive frames in a burst are ~0.98 s apart (frame-callback throttling), so a second capture right after a commit can miss a 1000 ms window |
+| `GtkEventControllerLegacy` in capture phase on each toplevel observes input for attribution | measured (spike S4, `spikes/s4-input-attribution`, nested niri 26.04, real input from wayland-mcp virtual pointer/keyboard, 2026-10-26): the toplevel's capture controller sees `ButtonPress/Release`, `Motion`, `KeyPress/Release` for widgets inside the window. Emissions follow the last input event by 0.1 to 1.3 ms (typed text → `GtkEditable::changed`), 0.2 to 0.6 ms (button click: `clicked` fires on release, after the controller saw it) and ~100 ms (`GtkSwitch::state-set`, animated). **Popovers are separate natives**: key presses and clicks inside an open popover menu reach only a controller installed on the popover (`popover KeyPress` logged, nothing on the window), so the controller must be added to every `GtkPopover` too. **Limits of the 300 ms rule**: an app emission that happens to fall within 300 ms after real input is attributed `human` (seen once: an app timer 230 ms after a switch click); the window is a rule of thumb. Driving note: a long-lived wayland-mcp server delivered only its first virtual-pointer click in the nested niri (output `Flipped180`, 1433×1745); a fresh server per click delivered all of them; key input was unaffected |
 | GTK's accessible tree and its AT-SPI export can be joined by parallel structural walk | measured (spike S3, GTK 4.2x + libadwaita 0.9 fixture, private session + a11y bus, 2026-10-26): an order-preserving alignment per sibling list (role-compatibility score, +buildable id/`AccessibleId`, +label = name) joins 300 of 304 AT-SPI nodes (99 %; the 3 unjoined are `GtkDropDown` list-item wrappers, `ref: null`). Only 29 % of the 1034 `GtkAccessible` nodes are exported (734 are not: role `none`/`presentation` internals such as the `GtkText` inside entries, list-view row wrappers, unrealized/hidden content), so join success is measured against the AT-SPI side. Every named control in the fixture (`automation_id`) joins except `AdwSpinRow` internals. 50 of 300 pairs also match by `AccessibleId` = buildable id; widgets without buildable ids (plain gtk-rs/relm4 widgets) join by structure alone. GTK's own `GetRoleName` returns the `GtkAccessibleRole` nick with spaces (`text box`, `list item`), which is the strong role signal (the AT-SPI role enum names do not appear) |
 | A private session bus activates `org.a11y.Bus` but not the AT-SPI registry | measured (S3): without systemd/gnome-session nobody starts `at-spi2-registryd`; `Registry` calls fail with "Could not activate remote peer ... unit failed". The test harness starts one on the private bus (own `XDG_RUNTIME_DIR`, so `at-spi/bus_N` cannot collide with the user's a11y bus). AT-SPI method calls and signal streams must use separate connections: a signal stream's bounded queue applies backpressure to its connection and stalled every reply (4 s timeouts) until the event source got its own |
 | An app is found on the a11y bus by `GetConnectionUnixProcessID` of the registry's application roots | measured (S3) |
@@ -102,7 +104,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| `gtk-mcp` (broker) | MCP over stdio; session discovery and handshake; policy (mutations, launch, AT-SPI); toolset filtering; snapshot/capture retention; event/log/post-mortem buffers; process lifecycle for apps it launched; AT-SPI client; PNG diffing |
+| `gtk-mcp` (broker) | MCP over stdio; session discovery and handshake; policy (launch, AT-SPI); toolset filtering; snapshot/capture retention; event/log/post-mortem buffers; process lifecycle for apps it launched; AT-SPI client; PNG diffing |
 | `gtk-mcp-agent` | Embedded; owns the object registry, all GTK access, adapters, redaction, settle, batch execution, record |
 | `gtk-mcp-protocol` | Shared serde types (section 7); the only contract between the two |
 | `gtk-mcp-agent-capi` | `cdylib` + header + GIR typelib for C / Python / GJS hosts |
@@ -110,70 +112,74 @@ flowchart LR
 
 ### 4.1 Conventions reused from wayland-mcp
 
-rmcp 3.7 with `#[tool_router]` / `#[tool(annotations(...))]`; typed params with
-`schemars`; `--tools` / `--exclude-tools` with unknown names failing startup;
-`observe` on mutating tools; batch validation and limits; lifecycle restricted
-to server-launched processes; bounded waits returning `satisfied:false`;
-fixture binary pattern; artifacts under `$XDG_DATA_HOME/gtk-mcp`.
+These come from wayland-mcp unchanged: rmcp 3.7 with `#[tool_router]` /
+`#[tool(annotations(...))]`; typed params with `schemars`; `--tools` /
+`--exclude-tools`, where an unknown name stops startup; `observe` on mutating
+tools; batch checks and limits; lifecycle tools only for processes the server
+launched; bounded waits that return `satisfied:false`; the fixture binary
+pattern; artifacts under `$XDG_DATA_HOME/gtk-mcp`.
 
 ### 4.2 Agent execution model
 
 - `attach` must be called on the main thread after the application object
-  exists. GTK itself may not be initialized yet (plain gtk-rs initializes it
-  inside `GApplication::startup`, after `attach`); the executor therefore
-  checks before every request. If GTK is initialized but gtk-rs is not (C/GI
-  hosts), the agent checks `gtk_is_initialized()` through FFI and calls
-  `gtk::set_initialized()`; before GTK is initialized a request is answered
+  exists. GTK may not be initialized yet: plain gtk-rs initializes it inside
+  `GApplication::startup`, which runs after `attach`. So the executor checks
+  before every request. If GTK is initialized but gtk-rs doesn't know it yet
+  (C/GI hosts), the agent checks `gtk_is_initialized()` through FFI and calls
+  `gtk::set_initialized()`. Before GTK is initialized, requests get
   `unavailable`.
 - `attach` creates an `async_channel` and starts one long-lived
   `glib::spawn_future_local` executor loop on the default main context. The
-  loop runs only while the main loop iterates; requests that arrive earlier
-  wait in the channel. Nothing ever calls GTK from the socket thread.
-- The socket is bound in the application's `startup` handler (or immediately
-  if already registered). A remote `GApplication` instance never emits
-  `startup` and therefore never binds.
+  loop only runs while the main loop runs. Requests that arrive earlier wait
+  in the channel. The socket thread never calls GTK.
+- The socket is opened in the application's `startup` handler, or right away
+  if the app is already registered. A remote `GApplication` instance never
+  gets `startup`, so it never opens a socket.
 - Every request carries `id` and `deadline_ms`. The executor marks a request
-  `started` when dequeued. Handlers are async (`wait_for`, settle, batch,
-  record).
-- Broker timeout → broker sends `$/cancel`. Not-yet-started requests are
-  dropped and answered `not_started`. Started requests observe a cancellation
-  token at their await points; if a mutation already ran, the eventual result
-  is delivered as `$/late_result` and recorded in the session event log. The
-  broker never retries.
-- A main loop that does not dequeue within the deadline yields
-  `target_unresponsive` with `started: false`.
+  `started` when it takes it off the queue. Handlers are async (`wait_for`,
+  settle, batch, record).
+- When the broker times out, it sends `$/cancel`. Requests that haven't
+  started are dropped and answered `not_started`. Started requests check a
+  cancellation token each time they await. If a mutation already ran, its
+  result arrives later as `$/late_result` and goes into the session event
+  log. The broker never retries.
+- If the main loop doesn't take a request off the queue before its deadline,
+  the answer is `target_unresponsive` with `started: false`.
 
 ### 4.3 Object registry
 
-- Ref ids are stored in object qdata (`gtk-mcp-ref`); the registry maps id →
-  `glib::WeakRef<glib::Object>`. Address reuse cannot resurrect an old ref.
-- Widgets get `w<N>`, other GObjects `o<N>`. Actions are not objects: they are
-  addressed as `{scope: Target, name}`.
-- States: `live` (in a root), `detached` (alive, `gtk_widget_get_root` is NULL
-  and not itself a root), `stale` (finalized).
-- Operations needing a root (`interact`, `capture`, `inspect_layout`) fail
-  `detached`; `inspect` / `get_property` work on detached objects.
+- Ref ids are stored in object qdata (`gtk-mcp-ref`). The registry maps id →
+  `glib::WeakRef<glib::Object>`, so a reused memory address can't bring back
+  an old ref.
+- Widgets get `w<N>`, other GObjects `o<N>`. Actions are not objects; they
+  are addressed as `{scope: Target, name}`.
+- States: `live` (inside a root), `detached` (alive, `gtk_widget_get_root` is
+  NULL, and not a root itself), `stale` (finalized).
+- Operations that need a root (`interact`, `capture`, `inspect_layout`) fail
+  with `detached`. `inspect` / `get_property` work on detached objects.
 
 ### 4.4 Secrecy model
 
-Secrecy is an object property, computed centrally and enforced in the value
-serializer.
+Secrecy is a property of an object. It is worked out in one place and
+enforced where values are serialized.
 
 - Secret roots: `GtkPasswordEntry`; `GtkEntry` / `GtkText` with
   `input-purpose` `password` or `pin`; `GtkEntry` / `GtkText` with
-  `visibility=false` when first observed; libadwaita `AdwPasswordEntryRow`
+  `visibility=false` when first seen; libadwaita `AdwPasswordEntryRow`
   (by GType name); anything passed to `mark_secret`.
-- Secret set: roots, their descendants, their editable delegate
-  (`gtk_editable_get_delegate`), and their buffer objects. Secrecy is sticky
-  for the object's lifetime (peek toggling `visibility` does not clear it).
-- Enforcement: text-bearing and length properties of secret objects return
-  `{"redacted": true}`; text selectors and `wait_for` text conditions skip
-  secret objects; `watch` events on secret objects carry property names only;
-  `inspect_render` and `capture` refuse targets whose subtree contains a
-  secret object with `visibility=true` (peeking) → `redacted`;
+- Secret set: the roots, their descendants, their editable delegate
+  (`gtk_editable_get_delegate`) and their buffer objects. Once secret, an
+  object stays secret for its whole life. Showing the text with the peek
+  icon toggles `visibility` but doesn't clear it.
+- Enforcement: text and length properties of secret objects return
+  `{"redacted": true}`. Text selectors and `wait_for` text conditions skip
+  secret objects. `watch` events on secret objects carry property names
+  only. `inspect_render` and `capture` fail with `redacted` if the target's
+  subtree has a secret object with `visibility=true` (peeking).
   `inspect_render` always replaces text nodes inside secret subtrees.
 - `record` replaces secret input with placeholders `{{secret:N}}`.
-- Captures of non-peeking password fields show GTK's bullets; that is accepted.
+- Captures of password fields that are not peeking show GTK's bullets. That
+  is accepted.
 
 ### 4.5 Policy
 
@@ -185,13 +191,13 @@ serializer.
 | AT-SPI source | off | broker `--allow-atspi` |
 | Toolsets | `core` | broker `--toolsets core,actions,...`; `--tools` / `--exclude-tools` refine |
 
-- `launch_app` passes caller-supplied env through like any other variable;
-  it sets only `GTK_MCP_DIR` (its socket directory).
-- `attach` reads only `GTK_MCP_DIR` and removes nothing from its process
-  environment. GTK presets (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are
-  intentionally inherited by children; documented.
-- `batch` is advertised as non-read-only; its steps are validated before
-  anything executes.
+- `launch_app` passes the caller's environment variables through like any
+  others. The only one it sets is `GTK_MCP_DIR` (its socket directory).
+- `attach` reads only `GTK_MCP_DIR` and removes nothing from the process
+  environment. Child processes inherit GTK presets (`GDK_DEBUG`,
+  `GSK_RENDERER`, `LANGUAGE`, …) on purpose, and this is documented.
+- `batch` is advertised as not read-only. All its steps are checked before
+  anything runs.
 
 ## 5. Flows
 
@@ -215,57 +221,79 @@ sequenceDiagram
 
 ### 5.2 Request
 
-Broker validates params, policy, and toolset → sends request with
-`deadline_ms` → agent socket thread enqueues → executor dequeues (`started`),
-resolves target (selector → exactly one, else `ambiguous_target` with ≤10
-candidates; ref → `stale_reference` / `detached` checks) → runs handler →
-applies secrecy → optional `observe` (snapshot subtree and/or settled capture)
-→ response. Timeout path per 4.2.
+1. The broker checks the params, policy and toolset, then sends the request
+   with `deadline_ms`.
+2. The agent socket thread puts it in the queue.
+3. The executor takes it off the queue (`started`).
+4. The executor resolves the target. A selector must match exactly one
+   widget, or the result is `ambiguous_target` with up to 10 candidates. A
+   ref is checked for `stale_reference` / `detached`.
+5. The handler runs.
+6. Secrecy is applied.
+7. If asked, `observe` adds a snapshot of the subtree and/or a settled
+   capture.
+8. The response goes back.
+
+Timeouts work as described in 4.2.
 
 ### 5.3 Settled capture
 
-Resolve target → `detached` / `target_unmapped` checks → if `settle` (default):
-await target native's frame clock `after-paint` that occurs after the request
-started (only when the widget has pending changes; a clean widget's last frame
-is already settled), bounded by `settle_timeout_ms` (default 2000, see 13) → paintable of target →
-render with the native's renderer → PNG. No paint before timeout: return the
-last frame with `stale: true, reason: "no_frame"`, or `capture_unavailable`
-when there has never been a frame. Animations are not awaited; callers use
-`override_setting animations=false`. A window capture excludes open popovers;
-popovers are captured as their own targets.
+1. Resolve the target and check for `detached` / `target_unmapped`.
+2. If `settle` is on (the default) and the widget has pending changes, wait
+   for an `after-paint` on the target native's frame clock that comes after
+   the request started. A widget with no pending changes is already settled:
+   its last frame is current. The wait is bounded by `settle_timeout_ms`
+   (default 2000, see 13).
+3. Get the target's paintable, render it with the native's renderer, and
+   encode a PNG.
+
+If nothing paints before the timeout, the last frame is returned with
+`stale: true, reason: "no_frame"`. If there has never been a frame, the
+result is `capture_unavailable`. Animations are not waited for; callers use
+`override_setting animations=false`. A window capture leaves out open
+popovers. Popovers are captured as targets of their own.
 
 ### 5.4 Batch
 
-Validate every step before the first dispatch (tool names, params, policy,
-≤100 steps, no nested `batch`, no lifecycle tools) → for each step: yield one
-main-loop iteration, resolve its target at that moment (steps may use
-`$N.ref` from step N's result), run with a per-step deadline → stop at the
-first error unless `stop_on_error:false` → per-step results. No rollback.
+1. Check every step before the first one runs: tool names, params, policy,
+   at most 100 steps, no nested `batch`, no lifecycle tools.
+2. For each step: let the main loop run once, resolve the step's target at
+   that moment (a step may use `$N.ref` from step N's result), and run it
+   with its own deadline.
+3. Stop at the first error unless `stop_on_error:false`.
+4. Return a result for each step. Nothing is rolled back.
 
 ### 5.5 Launch, restart, stop, post-mortem
 
-`launch_app` (policy-gated) spawns argv without a shell, with presets and
-optional `WAYLAND_DISPLAY`, capturing stdout/stderr into a cursor log → waits
-for the session socket → returns session. `restart_app` / `stop_app` act only
-on broker-launched processes (process group, SIGTERM then SIGKILL). On socket
-EOF or process exit, the session becomes `exited` with code/signal, the
-in-flight request id, and the retained logs/events; it stays listed until the
-broker drops it (bounded count).
+`launch_app` needs the launch policy flag. It starts the argv without a
+shell, with presets and an optional `WAYLAND_DISPLAY`, and captures
+stdout/stderr into a log you read by cursor. It waits for the session socket
+and returns the session. `restart_app` / `stop_app` only act on processes
+the broker launched (process group, SIGTERM then SIGKILL). When the socket
+closes or the process exits, the session becomes `exited` with the exit
+code or signal, the id of the request that was running, and the kept logs
+and events. It stays listed until the broker drops it (only a limited
+number are kept).
 
 ### 5.6 Record
 
-`record` installs: a capture-phase `GtkEventControllerLegacy` on every
-toplevel and every popover (timestamps the last real input event; popovers
-are separate natives, spike S4), and emission hooks on
-`GtkButton::clicked`, `GtkToggleButton::toggled`, `GtkCheckButton::toggled`,
-`GtkSwitch::state-set`, `GtkEditable::changed`, `GtkExpander::activate`,
-`GtkRange::value-changed`, `GtkSpinButton::value-changed`,
-`GSimpleAction::activate`, `GSimpleAction::change-state`. Emissions during the
-agent's own handlers are ignored (reentrancy flag). Emissions within 300 ms of
-a real input event are `human`; others `app`. `stop_recording` emits a `batch`
-script using selectors (automation_id > buildable_id > type + text + ancestor),
-with secret values as `{{secret:N}}` placeholders, and lists `app` emissions
-separately.
+`record` installs two things:
+
+- a capture-phase `GtkEventControllerLegacy` on every toplevel and every
+  popover, which notes the time of the last real input event (popovers are
+  separate natives, spike S4);
+- emission hooks on `GtkButton::clicked`, `GtkToggleButton::toggled`,
+  `GtkCheckButton::toggled`, `GtkSwitch::state-set`, `GtkEditable::changed`,
+  `GtkExpander::activate`, `GtkRange::value-changed`,
+  `GtkSpinButton::value-changed`, `GSimpleAction::activate`,
+  `GSimpleAction::change-state`.
+
+Emissions while the agent's own handlers run are ignored (reentrancy flag).
+Emissions within 300 ms of a real input event count as `human`; the rest are
+`app`. `stop_recording` produces a `batch` script that uses selectors
+(automation_id > buildable_id > type + text + ancestor), puts
+`{{secret:N}}` placeholders in place of secret values, and lists `app`
+emissions separately.
 
 ## 6. Repository layout
 
@@ -280,15 +308,16 @@ gtk-mcp/
   docs/
 ```
 
-- The agent compiles against the gtk4 `v4_10` floor. Newer symbols
-  (`gtk_accessible_get_accessible_id`, 4.22) and libadwaita functions are
-  resolved with `dlsym`; libadwaita objects are handled by GType name and
-  GObject properties. The agent never links libadwaita or gtk4-layer-shell.
-- gtk4-layer-shell getters are resolved with `dlsym(RTLD_DEFAULT)` only when
-  the library is already loaded.
-- `gtk4-sys` declares `links = "gtk-4"`, so an app and agent on incompatible
-  gtk4 crate majors fail Cargo resolution; the agent's supported range tracks
-  glimpse (`gtk4 0.11`).
+- The agent is built against the gtk4 `v4_10` feature, the oldest GTK it
+  supports. Newer functions (`gtk_accessible_get_accessible_id`, 4.22) and
+  libadwaita functions are looked up with `dlsym`. libadwaita objects are
+  handled by GType name and GObject properties. The agent never links
+  libadwaita or gtk4-layer-shell.
+- gtk4-layer-shell getters are looked up with `dlsym(RTLD_DEFAULT)`, and only
+  when the library is already loaded.
+- `gtk4-sys` declares `links = "gtk-4"`, so an app and agent on different
+  gtk4 crate major versions fail when Cargo resolves dependencies. The agent
+  follows the version glimpse uses (`gtk4 0.11`).
 
 ## 7. Contract types
 
@@ -483,8 +512,8 @@ pub struct SessionInfo {
 }
 ```
 
-Snapshot node shape: `widget-tree.md` ("Canonical JSON form"), unchanged by
-this section.
+The snapshot node shape is defined in `widget-tree.md` ("Canonical JSON
+form"). This section doesn't change it.
 
 ### 7.1 Configuration
 
@@ -496,36 +525,37 @@ this section.
 | `--allow-launch`, `--allow-atspi` | broker | policy gates |
 | `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | broker | bounded retention |
 
-Socket path: `<dir>/<pid>.sock` (short enough for `sun_path`); app ID and
-versions travel in the handshake. The broker only adopts a socket served by
-the process it is named after (`SO_PEERCRED` pid) whose `hello_ack.pid`
-agrees, because that pid drives launch adoption and stop signals.
+Socket path: `<dir>/<pid>.sock`, short enough to fit in `sun_path`. The app
+ID and versions travel in the handshake. The broker only uses a socket if
+the process serving it is the one in its name (`SO_PEERCRED` pid) and
+`hello_ack.pid` agrees. That pid decides which launched process a session
+belongs to and where stop signals go.
 
 ## 8. How the pieces connect
 
 - MCP tool params (`InteractParams`, `CaptureParams`, …) are defined once in
-  `gtk-mcp-protocol`; the broker derives rmcp schemas from them and forwards
-  the same JSON as the JSON-RPC `params` with `_meta.deadline_ms`.
-- The broker resolves `session` to a socket connection; the agent resolves
+  `gtk-mcp-protocol`. The broker builds rmcp schemas from them and forwards
+  the same JSON as the JSON-RPC `params`, with `_meta.deadline_ms`.
+- The broker maps `session` to a socket connection. The agent resolves
   `Target` against its registry (4.3) and applies the secrecy model (4.4)
-  before serializing any value.
-- Snapshots and captures are produced by the agent and retained by the
-  broker (`snapshot_id`, `capture_id`), which serves `diff_snapshots` and
+  before it serializes any value.
+- The agent makes snapshots and captures. The broker keeps them
+  (`snapshot_id`, `capture_id`) and answers `diff_snapshots` and
   `diff_captures` without calling the agent.
-- `$/event`, `$/log`, `$/progress`, `$/late_result` notifications feed broker
-  ring buffers that back `read_events`, `read_logs`, MCP progress, and
-  post-mortems.
-- AT-SPI data is fetched by the broker and joined to agent refs through the
-  agent's `accessible_tree` (structural walk, spike S3); unjoined AT-SPI nodes
-  are returned with `ref: null`.
-- Logs: broker captures stderr of broker-launched apps (GTK's default
-  structured writer prints there). Apps that install their own writer can call
-  `gtk_mcp_agent::forward_log(level, fields)` from it (`LogForwarding`
+- `$/event`, `$/log`, `$/progress` and `$/late_result` notifications go into
+  ring buffers in the broker. Those back `read_events`, `read_logs`, MCP
+  progress and post-mortems.
+- The broker fetches AT-SPI data and links it to agent refs through the
+  agent's `accessible_tree` (structural walk, spike S3). AT-SPI nodes that
+  can't be linked come back with `ref: null`.
+- Logs: the broker captures stderr of apps it launched (GTK's default
+  structured writer prints there). Apps that install their own writer can
+  call `gtk_mcp_agent::forward_log(level, fields)` from it (`LogForwarding`
   capability). The agent never installs a writer.
 
 ## 9. Acceptance criteria
 
-All checks run against `gtk-mcp-fixture` unless stated.
+Every check runs against `gtk-mcp-fixture` unless it says otherwise.
 
 ```text
 AC-1  As an agent, I want to discover instrumented apps, so that I can target the right process.
@@ -618,7 +648,7 @@ AC-15 As the glimpse developer, I want to inspect my shell, so that I can debug 
 | M7 Other languages | `gtk-mcp-agent-capi`, header, GIR, Python/GJS smoke | attach + snapshot from Python and GJS fixtures |
 | M8 glimpse | `gtk-mcp` feature in glimpse binaries, systemd dev drop-in, `register_state` for panels and lock state | AC-15 |
 
-Spikes, each before its milestone:
+Spikes, each done before the milestone that needs its answer:
 
 | Spike | Question | Before |
 |---|---|---|
@@ -665,8 +695,8 @@ Spikes, each before its milestone:
 
 ## 13. Review record
 
-Reviewer: `GtkMcpDocReview` (independent reviewer agent), 2026-10-26, over
-`tools.md`, `widget-tree.md`, `embedding.md`.
+Reviewer: `GtkMcpDocReview` (an independent reviewer agent), 2026-10-26. It
+reviewed `tools.md`, `widget-tree.md` and `embedding.md`.
 
 | Finding | Resolution |
 |---|---|
@@ -699,17 +729,18 @@ Reviewer: `GtkMcpDocReview` (independent reviewer agent), 2026-10-26, over
 | M5 as built | S4 corrected §5.6: the controller goes on popovers as well as toplevels (hook on `GtkWidget::map` for later ones). `watch` kinds are `notify` / `signal` / `model`; notify uses `connect_notify_local`, signals one shared emission hook per signal id (`hooks.rs`). `read_events` / `read_logs` are answered by the broker from the session rings (no agent call, also after exit); `unavailable` logs for external apps unless the app advertises `LogForwarding` or sent a `$/log`. The reentrancy flag of §5.6 is set while the agent polls a request future (`diag::Busy`) so user input between awaits is never attributed to the agent. `forward_log(glib::LogLevel, &[glib::LogField])` is a Rust API; the C ABI wrapper is not part of M5 |
 | M6 as built | `accessible_tree`/`inspect_accessible` are answered by the agent from the public `GtkAccessible` API (role, parent/children, bounds, platform state, plus the widget facts audit rules need; secret widgets carry none) and the broker joins AT-SPI onto the *full* toplevel tree, then extracts the requested subtree (`root`, `max_depth` apply after the join). `audit_accessibility` is broker-only (`agent: false`): rules run over the joined tree. GTK rules: `interactive_not_focusable`, `icon_button_no_label`, `small_target` (< 24 px), `window_untitled`; AT-SPI rules (skipped with a reason when `--allow-atspi` is off or the app is not on the a11y bus): `missing_name`, `image_without_text`, `interactive_not_exported`. `inspect_accessible` tags every field `{"value", "source": "gtk"\|"atspi"}`; unavailable AT-SPI fields are `{"available": false, "source": "atspi", "reason"}`; secret widgets' name/description/text/value are `{"redacted": true}`. `trace_focus_order` (mutating) walks `gtk_widget_child_focus(TabForward)` from no focus over the window or over a `root` subtree and reports `order`, `end` (`end` \| `loop` \| `trap` \| `stuck` \| `max_steps`), `unreachable` (focusable, mapped, sensitive widgets never reached; `null` when cut off by `max_steps`) and restores the previous focus. AT-SPI events: `Broker::watch_atspi`/`unwatch_atspi` forward focus, state, name and window events of one app into the session event ring as `{"kind":"atspi", "event":"object:state-changed:focused", "ref", "role", "name", ...}` (ref/role/name from the latest join, refreshed when an unknown object appears; secret widgets carry no name); the `watch` tool entry point belongs to M5. `Config.atspi_bus` (`BusConfig`) overrides the session/a11y bus address (default: `DBUS_SESSION_BUS_ADDRESS` then `org.a11y.Bus.GetAddress`, or `AT_SPI_BUS_ADDRESS`) |
 | M5/M6 watch integration | `watch {kind: "atspi", events?: [prefix, ...]}` is app-wide (omit `target`) and calls `Broker::watch_atspi`; it requires `--allow-atspi`. The session has one AT-SPI subscription, id `"atspi"`, replaced by another AT-SPI watch. Records include that subscription id and work with `read_events` filters; `unwatch` calls `Broker::unwatch_atspi`, including for an exited session. `a11y_focus_event_carries_the_joined_ref` exercises watch/read_events/unwatch through the broker tool entry point. |
-| Minors (full-view wording, accessible_id, socket path/bind time, class-action enabled, ellipsis scope, highlight class, focus walk side effects, diff ids, action refs, no-portals scope, instance count availability, example, glimpse-lock type, visibility scope, shortcut scopes) | applied across `tools.md`, `widget-tree.md`, `embedding.md`, and sections 4–7, 11 |
+| Minors (full-view wording, accessible_id, socket path/bind time, class-action enabled, ellipsis scope, highlight class, focus walk side effects, diff ids, action refs, no-portals scope, instance count availability, example, glimpse-lock type, visibility scope, shortcut scopes) | applied across `tools.md`, `widget-tree.md`, `embedding.md`, and sections 4 to 7 and 11 |
 | Spec correction: compile-time gate only | The runtime env/flag gates are removed: no app-env activation variable, no app-env mutation variable, no broker mutation flag, no mutation flag in the handshake, no env scrubbing, and `launch_app` no longer rejects or sets agent env variables (it sets only `GTK_MCP_DIR`, the socket location). The only gate is `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or the feature alone) at the `attach` call site; removing `debug_assertions` enables the agent in release. `MutationsDisabled` stays in the error enum for wire compatibility but is never emitted for a gate. Sections 4.5, 5.1, 7, 7.1, 9 (AC-1/4/9/11/15) and 12 updated accordingly |
 
-Self-consistency pass (this plan): every type named in prose appears in
-section 7; every enum variant in section 7 is used by a flow, tool, or AC.
-Tool totals verified against `tools.md`: 56 tools, 17 mutating.
+Self-consistency check of this plan: every type named in the text appears in
+section 7, and every enum variant in section 7 is used by a flow, tool or AC.
+Tool totals match `tools.md`: 56 tools, 17 mutating.
 
 ## 14. Durability
 
-Committed in the `gtk-mcp` git repository. Work is tracked in beads (prefix
-`gm`): one epic per milestone (M0 `gm-be2`, M1 `gm-1ms`, M2 `gm-96t`,
-M3 `gm-voc`, M4 `gm-7lm`, M5 `gm-et7`, M6 `gm-xae`, M7 `gm-7mz`, M8 `gm-itz`),
-with child issues whose descriptions start with a `Source:` line pointing at
-this plan or its companion documents, and `--spec-id docs/plan.md`.
+The plan is committed in the `gtk-mcp` git repository. Work is tracked in
+beads (prefix `gm`), with one epic per milestone (M0 `gm-be2`, M1 `gm-1ms`,
+M2 `gm-96t`, M3 `gm-voc`, M4 `gm-7lm`, M5 `gm-et7`, M6 `gm-xae`, M7 `gm-7mz`,
+M8 `gm-itz`). Each child issue's description starts with a `Source:` line
+that points at this plan or its companion documents, and uses
+`--spec-id docs/plan.md`.
