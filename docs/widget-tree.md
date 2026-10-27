@@ -1,27 +1,25 @@
 # Widget tree snapshot
 
-Status: final, aligned with `plan.md` (2026-10-26).
-
 ## Purpose
 
 The widget tree is the main thing an agent looks at in `gtk-mcp`. It shows
-what a GTK application currently contains, so the agent can pick a target and
-then call `inspect`, `interact`, `inspect_layout`, or `capture` with an
-unambiguous reference.
+what a GTK app contains right now. The agent picks a widget from it, then
+calls `inspect`, `interact`, `inspect_layout` or `capture` with a reference
+that points at exactly that widget.
 
-It is a GTK widget tree. It is neither an accessibility tree nor a Wayland
-surface tree:
+It is the GTK widget tree. It is not the accessibility tree, and it is not a
+tree of Wayland surfaces:
 
-- Internal GTK containers and non-actionable widgets are present in the full
-  view.
-- Event controllers, actions, models, and other non-widget objects are not
-  tree children. They are reached through `inspect` from the widget that owns
-  or exposes them.
-- Popovers are parented children of their owner widget in GTK 4, so they
-  appear in place, marked `native: true`. They are not repeated as separate
-  roots; `list_windows` lists mapped native surfaces separately.
-- Content a widget holds but has unparented (a collapsed `GtkExpander`'s
-  child) appears through detached-content adapters, marked
+- The full view includes GTK's internal containers and widgets you can't
+  act on.
+- Event controllers, actions, models and other non-widget objects are not
+  children in the tree. You reach them through `inspect` on the widget that
+  owns them.
+- In GTK 4 a popover is a child of the widget that owns it, so it appears in
+  that spot, marked `native: true`. It is not repeated as a separate root.
+  `list_windows` lists open popovers and other native surfaces separately.
+- Some widgets keep content that is not currently in the tree, such as the
+  child of a collapsed `GtkExpander`. That content is still listed, marked
   `attached: false` (see "Detached content").
 
 ## Snapshot tool
@@ -43,48 +41,48 @@ surface tree:
 
 | Field | Meaning |
 |---|---|
-| `session` | Instrumented application session. Required. |
-| `root` | A target (`plan.md` section 7): ref, or selector whose `window` key uses `WindowSel`. Omitted: all toplevels in the session. |
+| `session` | The app session to read. Required. |
+| `root` | A target (`plan.md` section 7): a ref, or a selector whose `window` key uses `WindowSel`. If left out, all top-level windows in the session. |
 | `view` | `full` or `semantic`. Default: `full`. |
-| `format` | `text` or `json`. Default: `text`. JSON is canonical; text is derived from the same data. |
-| `max_depth` | Maximum descendant depth below the requested root. |
-| `max_nodes` | Hard node budget. Truncation is reported, never silent. |
-| `include_unmapped` | Include widgets that exist in the hierarchy but are not mapped. Default: `true`. |
-| `include_closed_popovers` | Expand subtrees of unmapped popovers. Default: `false`: a closed popover appears as one node with `children_collapsed: true` and its child count. |
-| `text_limit` | Maximum characters of label/text content per node. Truncation is reported. |
+| `format` | `text` or `json`. Default: `text`. JSON is the reference form; text is made from the same data. |
+| `max_depth` | How many levels below the root to include. |
+| `max_nodes` | The most nodes to return. Cut-offs are always reported. |
+| `include_unmapped` | Include widgets that exist but are not on screen (not mapped). Default: `true`. |
+| `include_closed_popovers` | Show what is inside closed popovers. Default: `false`: a closed popover is one node with `children_collapsed: true` and its child count. |
+| `text_limit` | The most characters of label or text per node. Cut-offs are reported. |
 
 ### Views
 
-The `full` view lists every widget in the hierarchy reachable through
+The `full` view lists every widget you reach through
 `gtk_widget_get_first_child` / `gtk_widget_get_next_sibling`, in child order,
-plus detached content from adapters, up to the requested limits.
+plus detached content, up to the limits you set.
 
-The `semantic` view is a compressed view for task-oriented work. It keeps
-actionable, text-bearing, selectable, and state-bearing widgets, plus the
-ancestors needed to preserve hierarchy. It may elide purely structural or
-decorative widgets. Elision is marked in JSON (`elided_children`) and in
-text (`… 3 structural widgets`). The semantic view never invents nodes and
-never changes the parentage of the nodes it keeps: an elided node's kept
-descendants stay attached to their nearest kept ancestor, and the elision
-marker records that the path is compressed. A node cut by `max_depth` or
-`max_nodes` is always kept, so its `children_truncated` marker survives.
+The `semantic` view is shorter, for getting a task done. It keeps widgets
+you can act on, widgets with text, selectable widgets and widgets with
+state, plus the parents needed to keep the hierarchy. It may hide widgets
+that only do layout or decoration. Hidden widgets are marked in JSON
+(`elided_children`) and in text (`… 3 structural widgets`). The semantic
+view never makes up nodes and never moves the nodes it keeps: a kept widget
+stays under its nearest kept ancestor, and the marker shows that levels were
+skipped. A node cut off by `max_depth` or `max_nodes` is always kept, so its
+`children_truncated` marker stays visible.
 
-The default stays `full`. This is a GTK development tool, and layout bugs
-usually live in the structural widgets a semantic view would hide.
+The default is `full`. This is a tool for GTK development, and layout bugs
+usually sit in the layout widgets that the semantic view would hide.
 
 ### Detached content
 
-Some widgets unparent content while hidden and keep a reference to it. The
-agent lists such content under its holder through per-type adapters, read via
-public properties:
+Some widgets remove their content from the tree while it is hidden but keep
+a reference to it. The agent lists that content under the widget that holds
+it, using a small adapter per widget type that reads public properties:
 
 | Holder | Source | Note |
 |---|---|---|
 | `GtkExpander` | `child` property | Unparented while collapsed |
 
-Adapter nodes carry `attached: false` and `via: "GtkExpander:child"`. The
-agent walks their descendants normally. New adapters are added only for
-verified GTK behavior.
+These nodes carry `attached: false` and `via: "GtkExpander:child"`. Their
+children are listed as usual. New adapters are added only for GTK behavior
+that has been checked.
 
 ## Canonical JSON form
 
@@ -112,48 +110,48 @@ verified GTK behavior.
 
 ### Node fields
 
-Required for every node:
+Every node has:
 
 | Field | Meaning |
 |---|---|
-| `ref` | Session-scoped opaque reference, e.g. `w42`. See "References". |
+| `ref` | A reference to this widget within the session, e.g. `w42`. See "References". |
 | `type` | GType name, e.g. `GtkExpander`, `AdwExpanderRow`, `GtkListView`. |
-| `children` | Child nodes in GTK child order, then detached content. Empty array for leaves. |
+| `children` | Child nodes in GTK child order, then detached content. An empty array if there are none. |
 
-Present when GTK exposes the information:
+These appear when GTK provides the information:
 
 | Field | Meaning |
 |---|---|
-| `identity.buildable_id` | `GtkBuildable` ID, when set. On GTK ≥ 4.22 this is also the widget's AT-SPI `AccessibleId`. |
-| `identity.automation_id` | The widget name, when the application set one explicitly (`gtk_widget_set_name`; GTK returns the type name when none is set, and that case is omitted). Needs no agent dependency in app code. See `embedding.md`. |
-| `identity.css_name` | Result of `gtk_widget_get_css_name`. |
-| `identity.css_classes` | Result of `gtk_widget_get_css_classes`, minus agent-owned classes (`gtk-mcp-highlight`). |
-| `role` | Accessible role from `gtk_accessible_get_accessible_role`. This annotates the node; it does not turn the tree into an accessibility tree. |
-| `a11y.name` | Accessible name. GTK has no public in-process getter for accessible properties, so this is present only when the broker's AT-SPI source is enabled and the node is joined, marked `"source": "atspi"`. Kept distinct from widget text. |
-| `label` | Human-readable label (button label, expander label, row title) when an adapter can read it. |
-| `text` | Text content for textual widgets. See "Text and redaction". |
+| `identity.buildable_id` | The `GtkBuildable` ID, if set. On GTK ≥ 4.22 this is also the widget's AT-SPI `AccessibleId`. |
+| `identity.automation_id` | The widget name, if the app set one (`gtk_widget_set_name`). GTK returns the type name when no name is set; that case is left out. The app doesn't need to depend on the agent for this. See `embedding.md`. |
+| `identity.css_name` | What `gtk_widget_get_css_name` returns. |
+| `identity.css_classes` | What `gtk_widget_get_css_classes` returns, minus the agent's own classes (`gtk-mcp-highlight`). |
+| `role` | The accessible role from `gtk_accessible_get_accessible_role`. It is extra information about the node; the tree is still the widget tree. |
+| `a11y.name` | The accessible name. GTK has no public way to read accessible properties from inside the app, so this only appears when the broker's AT-SPI source is on and the node could be linked. It is marked `"source": "atspi"` and kept separate from the widget's text. |
+| `label` | A readable label (button label, expander label, row title), when an adapter can read it. |
+| `text` | Text content of text widgets. See "Text and redaction". |
 | `value` | For range-like widgets: `{"current": …, "min": …, "max": …}`. |
-| `state` | Booleans that apply: `visible`, `mapped`, `sensitive`, `focusable`, `has_focus`, `expanded`, `active`, `checked`, `selected`. Inapplicable states are omitted, not reported as `false`. |
+| `state` | The flags that apply: `visible`, `mapped`, `sensitive`, `focusable`, `has_focus`, `expanded`, `active`, `checked`, `selected`. Flags that don't apply are left out instead of being reported as `false`. |
 | `native` | `true` for popovers and other native surfaces inside the tree. |
-| `attached` | `false` for detached content; omitted otherwise. `via` names the adapter. |
-| `children_collapsed` | Closed popover whose subtree was not expanded; includes `child_count`. |
-| `children_source` | `"realized"` on list views: children are the row widgets that exist, not the model. |
+| `attached` | `false` for detached content, otherwise left out. `via` names the adapter. |
+| `children_collapsed` | A closed popover whose contents were not listed. Comes with `child_count`. |
+| `children_source` | `"realized"` on list views: the children are the row widgets that exist, not the model items. |
 | `allocation` | `{"width": …, "height": …}` from the current allocation. |
-| `bounds_in_root` | Rectangle relative to the snapshot root via `gtk_widget_compute_bounds`, valid across popover boundaries. Omitted with a node-level warning when it fails. |
-| `capabilities` | Semantic operations this node supports, e.g. `["set_expanded", "activate", "focus"]`. Consumed by `interact`. |
-| `elided_children` | Semantic view only: number of nodes compressed away below this node. |
+| `bounds_in_root` | The rectangle relative to the snapshot root, from `gtk_widget_compute_bounds`. It works across popovers. If it can't be computed, it is left out and the node gets a warning. |
+| `capabilities` | The operations this node supports, e.g. `["set_expanded", "activate", "focus"]`. `interact` uses this list. |
+| `elided_children` | Semantic view only: how many nodes below this one were hidden. |
 | `secret` | `true` when the node is in the secret set (`plan.md` 4.4). |
-| `warnings` | Node-level problems, e.g. bounds unavailable, text unreadable. |
+| `warnings` | Problems with this node, e.g. bounds unavailable or text unreadable. |
 
-The agent does not guess unknown or version-specific data. Extra data goes
-under a namespaced key (`adw`, `a11y`) that the handshake capabilities
-announce; core fields do not change to carry it.
+The agent doesn't guess at data it doesn't know or that depends on the
+version. Extra data goes under its own key (`adw`, `a11y`), announced in the
+handshake capabilities. The core fields never change to carry it.
 
 ### Text format
 
-The text format renders the JSON with its structure intact and some content
-dropped. Hierarchy, order, type, reference, key state, and truncated text
-survive; long strings and class lists may be shortened.
+The text format shows the same tree as the JSON, with some detail left out.
+It keeps the hierarchy, order, type, reference, important state and cut-down
+text. Long strings and class lists may be shortened.
 
 ```text
 GtkWindow "Preferences" [w1] 480x640 mapped
@@ -170,74 +168,78 @@ GtkWindow "Preferences" [w1] 480x640 mapped
 
 Rules:
 
-- One node per line; indentation and box characters encode hierarchy.
-- `[wN]` is always present and is the handle used by every other tool.
+- One node per line. Indentation and box-drawing characters show the
+  hierarchy.
+- `[wN]` is always there. It is the handle every other tool uses.
 - Quoted text is escaped and cut at `text_limit`, marked with `…`.
-- State words appear only when they deviate from the parent's or are
-  diagnostically relevant: `mapped=false`, `sensitive=false`, `detached`,
-  `native`, `secret`; `expanded` is shown whenever the widget is expandable.
+- State words appear only when they differ from the parent or help with
+  debugging: `mapped=false`, `sensitive=false`, `detached`, `native`,
+  `secret`. `expanded` is always shown on widgets that can expand.
 
 ## References
 
-- References are opaque (`w42`), never memory addresses, child indices, or
-  screen coordinates.
-- Ref ids are stored in the object's qdata, and the registry holds only weak
-  references. Taking a snapshot never keeps a widget alive, and a reused
-  memory address never inherits an old ref.
-- Within one session, the same object keeps the same reference across
-  snapshots, so two snapshots can be compared.
-- Object states: `live` (inside a root), `detached` (alive but without a
-  root, and not itself a root), `stale` (finalized). Operations that need a
-  root fail `detached`; `inspect` and `get_property` still work. Resolving a
-  finalized object returns `stale_reference`.
-- Non-widget GObjects returned by other tools (models, list items, buffers,
+- References are opaque labels like `w42`. They are never memory addresses,
+  child positions or screen coordinates.
+- The ref id is stored on the object itself (in its qdata), and the agent's
+  registry holds only weak references. Taking a snapshot never keeps a widget
+  alive, and a new object at a reused memory address never gets an old ref.
+- Within one session, an object keeps the same reference from one snapshot
+  to the next, so you can compare snapshots.
+- An object is `live` (inside a window or other root), `detached` (alive but
+  not inside a root, and not a root itself) or `stale` (destroyed).
+  Operations that need a root fail with `detached`; `inspect` and
+  `get_property` still work. A ref to a destroyed object returns
+  `stale_reference`.
+- Other GObjects that tools return (models, list items, buffers,
   controllers, object-valued properties) get `oN` references with the same
-  rules. The prefix is informational; tools validate the object's type.
-- Actions are names, not objects; they are addressed as `{scope, name}`.
-- References are not portable across sessions, processes, or broker restarts.
+  rules. The prefix is only a hint; tools check the object's actual type.
+- Actions are names, not objects. You address them as `{scope, name}`.
+- References only work in their own session. They don't carry over to other
+  sessions, processes or a restarted broker.
 
 ## Semantics and limits
 
-- A snapshot is a point in time. The agent builds it on the GTK main thread
-  and it reflects one moment. To observe change, call `snapshot` again or use
-  `watch`.
-- Only existing children appear. In a virtualized `GtkListView`, the children
-  are the row widgets that exist (`children_source: "realized"`); the item
-  set is available through `inspect_model`.
-- Unmapped content is included by default. Hidden stack pages, unmapped
-  widgets, and detached content are listed so agents can find them before
-  revealing them. `capture` refuses unmapped targets.
-- Truncation is explicit. When `max_nodes` or `max_depth` cuts the tree, the
-  response sets `truncated: true`, reports `node_count` for the nodes
-  returned, and marks each cut node with `children_truncated: true` plus the
-  omitted count when known. `max_nodes` is one budget for all roots: roots
-  that no longer fit are left out and counted in `omitted_roots`.
+- A snapshot shows one moment. The agent builds it on the GTK main thread.
+  To see changes, take another `snapshot` or use `watch`.
+- Only children that exist are listed. A `GtkListView` only creates widgets
+  for some rows, so its children are those row widgets
+  (`children_source: "realized"`). Use `inspect_model` for the full list of
+  items.
+- Content that is not on screen is included by default: hidden stack pages,
+  unmapped widgets and detached content. That way the agent can find them
+  before showing them. `capture` refuses targets that are not on screen.
+- Cut-offs are always reported. When `max_nodes` or `max_depth` cuts the
+  tree, the response sets `truncated: true` and gives `node_count` for the
+  nodes it returned. Each cut node gets `children_truncated: true`, plus how
+  many children were left out when that is known. `max_nodes` is shared by
+  all roots: roots that no longer fit are left out and counted in
+  `omitted_roots`.
 - Nodes come in GTK child order, followed by detached content.
 
 ## Text and redaction
 
-Secrecy follows `plan.md` 4.4:
+Secrets follow `plan.md` 4.4:
 
-- Secret nodes report `"text_redacted": true` and omit content and length,
-  in both formats.
+- Secret nodes report `"text_redacted": true` and leave out both the text
+  and its length, in both formats.
 - Secret objects never match `text` / `text_contains` selectors.
-- Other text is cut at `text_limit` with `"text_truncated": true`.
-- Text read failures produce a node warning, not a snapshot failure.
+- Other text is cut at `text_limit` and marked `"text_truncated": true`.
+- If text can't be read, the node gets a warning; the snapshot still works.
 
 ## Comparing snapshots
 
-The broker keeps recent snapshots per session (`--retain-snapshots`) and
-offers:
+The broker keeps recent snapshots for each session (`--retain-snapshots`)
+and can compare two of them:
 
 ```json
 { "tool": "diff_snapshots", "session": "s1", "from": "snap-1041", "to": "snap-1042" }
 ```
 
-For each widget ref, the diff reports added nodes, removed nodes, and changed
+For each widget ref, the diff lists added nodes, removed nodes, and changed
 nodes with the fields that changed (`state.sensitive`, `text`, `attached`,
-child count, allocation size). It compares snapshot data only and makes no
-claim about why a change happened. Evicted snapshots return
-`snapshot_unavailable`.
+child count, allocation size). It only compares the snapshot data and says
+nothing about why something changed. A snapshot that is no longer kept
+returns `snapshot_unavailable`.
 
 ## Worked flow
 
@@ -256,21 +258,21 @@ capture(session, target="w8")
   → PNG of the expanded expander, stale=false
 ```
 
-## Acceptance checks
+## Guarantees
 
-These are covered by `plan.md` AC-2, AC-3, and AC-6:
+These are tested (`plan.md` AC-2, AC-3 and AC-6):
 
 - A collapsed expander's child is listed with `attached: false` and
-  `via: "GtkExpander:child"`; after `set_expanded`, a second snapshot shows it
-  attached and mapped, with the same ref.
-- A widget removed from its parent but kept alive returns `detached` from
-  `interact`; once finalized, its ref returns `stale_reference`; the agent
-  never keeps either alive.
+  `via: "GtkExpander:child"`. After `set_expanded`, a second snapshot shows
+  it attached and mapped, with the same ref.
+- A widget removed from its parent but still alive returns `detached` from
+  `interact`. Once it is destroyed, its ref returns `stale_reference`. The
+  agent never keeps either one alive.
 - A list view with more model items than row widgets reports
   `children_source: "realized"`.
-- A closed popover appears once, in place, with `native: true` and
+- A closed popover appears once, in its place, with `native: true` and
   `children_collapsed: true`.
-- Exceeding `max_nodes` sets `truncated: true` and marks cut nodes.
-- A password entry never exposes its text or length in either format.
-- Text output and JSON output of the same snapshot describe the same
-  hierarchy and references.
+- Going over `max_nodes` sets `truncated: true` and marks the cut nodes.
+- A password entry never shows its text or its length, in either format.
+- The text and JSON output of the same snapshot describe the same hierarchy
+  and references.
