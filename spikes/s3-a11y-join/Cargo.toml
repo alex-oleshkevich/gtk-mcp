@@ -1,0 +1,17 @@
+[package]
+name = "s3-a11y-join"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Excluded from the main workspace (spike S3, plan 3.2 / 10).
+[workspace]
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }
+libadwaita = { version = "0.9", features = ["v1_5"] }
+glib = "0.22"
+zbus = "5"
+serde = "1"
+serde_json = "1"
+libc = "0.2"
