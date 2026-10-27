@@ -20,7 +20,7 @@ jobs:
       - name: Install GTK 4 development libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libglib2.0-dev pkg-config
+          sudo apt-get install -y libgtk-4-dev libglib2.0-dev libadwaita-1-dev pkg-config
           if ! pkg-config --exists gtk4-layer-shell-0; then
             sudo apt-get install -y libgtk4-layer-shell-dev || true
           fi
