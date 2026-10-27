@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="assets/icon.svg" width="96" height="96" alt="gtk-mcp icon: a window of nested widgets under a magnifying glass">
+</p>
+
 # gtk-mcp
+
+[![QA](https://github.com/alex-oleshkevich/gtk-mcp/actions/workflows/qa.yml/badge.svg)](https://github.com/alex-oleshkevich/gtk-mcp/actions/workflows/qa.yml)
+[![Release](https://github.com/alex-oleshkevich/gtk-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/alex-oleshkevich/gtk-mcp/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 gtk-mcp lets a coding agent inspect and drive a running GTK4 or libadwaita app from inside the app's own process. The agent can read the widget tree, look at layout and styles, press buttons and fill in entries by calling GTK directly, take pictures of individual widgets, and watch what changes. It does not simulate keyboard or mouse input, and it does not take screenshots of your desktop. Use wayland-mcp for that kind of testing.
 
@@ -29,7 +37,7 @@ The binary ends up in `target/release/gtk-mcp`. Add it to your MCP client as a s
   "mcpServers": {
     "gtk-mcp": {
       "command": "/path/to/gtk-mcp",
-      "args": ["--toolsets", "core,app", "--allow-mutations"]
+      "args": ["--toolsets", "core,app"]
     }
   }
 }
@@ -50,11 +58,11 @@ gtk-mcp-agent = { version = "0.1", optional = true }
 Then call `attach` once, on the main thread, after your application object exists. With Relm4 that's right after `RelmApp::new`:
 
 ```rust
-#[cfg(feature = "gtk-mcp")]
+#[cfg(all(debug_assertions, feature = "gtk-mcp"))]
 gtk_mcp_agent::attach(&relm4::main_application());
 ```
 
-The agent does nothing unless `GTK_MCP=1` is in the environment when the app starts, so a debug build with the feature on is safe to keep around. Mutations need two more things: `GTK_MCP_MUTATIONS=1` in the app's environment and the `--allow-mutations` flag on the broker. Both sides have to opt in.
+That `#[cfg]` mark is the only gate: calling `attach` activates the agent (socket on startup, mutations accepted), and not calling it — feature off, or the mark changed to `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` — leaves the app untouched. There is no runtime environment gate. Removing the `debug_assertions` condition from the mark enables the agent in release builds too.
 
 Give widgets stable names where you can. After `entry.set_widget_name("server-address")`, the agent finds that entry as `server-address` whatever its label says and whatever language the UI is in.
 
@@ -64,10 +72,10 @@ C, Python and GJS apps use the C library in `crates/gtk-mcp-agent-capi` instead.
 
 ## Use it
 
-Start your app with the agent on:
+Start your app (built with the feature and the `attach` call compiled in):
 
 ```sh
-GTK_MCP=1 GTK_MCP_MUTATIONS=1 ./your-app
+./your-app
 ```
 
 Then ask your coding agent to take a look. In a typical round, `list_apps` finds your process, `snapshot` prints the window, `query` picks out one widget, `interact` opens the expander and fills the entry, `wait_for` waits until the Save button becomes sensitive, and `capture` renders the expander so the agent can see the result. After a rebuild, `restart_app` (with `--allow-launch`) starts the new binary, and the same session carries on against it.
@@ -76,7 +84,7 @@ Then ask your coding agent to take a look. In a typical round, `list_apps` finds
 
 ## Security
 
-The agent stays off without `GTK_MCP=1`. The socket is readable only by your user. Before the broker talks to a peer, it checks that the peer runs as your user and is the process the socket is named after. Password fields and anything you mark secret never appear in responses, not even as a length, and a capture refuses a password field while the field is showing its text. Other sensitive pixels can still end up in a capture, so don't enable the agent in a session with real credentials on screen.
+The agent is present only where the developer compiled the `attach` call in; a build without it has no agent at all. The socket is readable only by your user. Before the broker talks to a peer, it checks that the peer runs as your user and is the process the socket is named after. Password fields and anything you mark secret never appear in responses, not even as a length, and a capture refuses a password field while the field is showing its text. Other sensitive pixels can still end up in a capture, so don't enable the agent in a session with real credentials on screen.
 
 ## More
 
