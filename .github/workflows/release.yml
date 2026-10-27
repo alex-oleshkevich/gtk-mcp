@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: macos-amd64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTK 4 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libglib2.0-dev pkg-config
+
+      - name: Install GTK 4 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gtk4 glib pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --workspace --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          files=()
+          for f in gtk-mcp gtk-mcp-fixture; do
+            [ -f "$f" ] && files+=("$f")
+          done
+          for lib in libgtk_mcp_agent_capi.so libgtk_mcp_agent_capi.dylib; do
+            [ -f "$lib" ] && files+=("$lib")
+          done
+          test -f gtk-mcp
+          tar -czf "$GITHUB_WORKSPACE/gtk-mcp-${GITHUB_REF_NAME}-${{ matrix.name }}.tar.gz" "${files[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtk-mcp-${{ matrix.name }}
+          path: gtk-mcp-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gtk-mcp-*
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: gtk-mcp-*.tar.gz
+          generate_release_notes: true
