@@ -3,6 +3,12 @@ name = "gtk-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "MCP server for inspecting and driving GTK4/libadwaita apps from inside the process"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [lib]
 name = "gtk_mcp"

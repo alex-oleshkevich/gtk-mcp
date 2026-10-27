@@ -104,3 +104,38 @@ jobs:
           files: gtk-mcp-*.tar.gz
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # Stable tags only: crates.io versions can be yanked but never deleted, so
+  # pre-release tags never publish crates.
+  crates:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches the crate version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "gtk-mcp") | .version')
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match crate version $version"; exit 1; }
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-crates-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Install GTK 4
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get update
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" libgtk-4-dev libglib2.0-dev pkg-config
+          sudo chown -R "$USER" ~/apt-archives
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --workspace

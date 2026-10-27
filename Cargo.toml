@@ -20,6 +20,11 @@ exclude = ["spikes"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/alex-oleshkevich/gtk-mcp"
+homepage = "https://github.com/alex-oleshkevich/gtk-mcp"
+readme = "README.md"
+keywords = ["gtk", "gtk4", "mcp", "libadwaita", "inspector"]
+categories = ["gui", "development-tools::debugging"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -32,5 +37,5 @@ gtk4 = { version = "0.11", features = ["v4_10"] }
 glib = "0.22"
 gio = "0.22"
 async-channel = "2.5"
-gtk-mcp-protocol = { path = "crates/gtk-mcp-protocol" }
-gtk-mcp-agent = { path = "crates/gtk-mcp-agent" }
+gtk-mcp-protocol = { path = "crates/gtk-mcp-protocol", version = "0.1.0" }
+gtk-mcp-agent = { path = "crates/gtk-mcp-agent", version = "0.1.0" }

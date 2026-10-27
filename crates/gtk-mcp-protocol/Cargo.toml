@@ -3,6 +3,12 @@ name = "gtk-mcp-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Wire protocol types shared by the gtk-mcp broker and the in-app agent"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde.workspace = true

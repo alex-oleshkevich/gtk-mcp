@@ -3,6 +3,12 @@ name = "gtk-mcp-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "In-process agent that lets the gtk-mcp MCP server inspect and drive a GTK4 app"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 gtk-mcp-protocol.workspace = true

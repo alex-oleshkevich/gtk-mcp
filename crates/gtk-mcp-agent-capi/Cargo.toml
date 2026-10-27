@@ -3,6 +3,8 @@ name = "gtk-mcp-agent-capi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "C ABI and GObject Introspection bindings for the gtk-mcp agent"
+publish = false
 
 [lib]
 name = "gtk_mcp_agent_capi"
