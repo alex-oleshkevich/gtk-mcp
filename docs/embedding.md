@@ -1,7 +1,5 @@
 # Embedding the agent
 
-Status: final, aligned with `plan.md` (2026-10-26).
-
 ## Shape
 
 ```mermaid
@@ -13,26 +11,30 @@ flowchart LR
   end
 ```
 
-- The app links `gtk-mcp-agent` behind a Cargo feature that release builds do
-  not enable.
-- The only gate is compile time: the developer's mark at the call site,
-  `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or the feature
-  alone). Calling `attach` activates the agent unconditionally; removing
-  `debug_assertions` from the mark enables it in release builds. There is
-  no runtime environment gate.
-- The agent binds `$XDG_RUNTIME_DIR/gtk-mcp/<pid>.sock` (directory `0700`,
-  socket `0600`; `GTK_MCP_DIR` overrides the directory) in the application's
-  `startup` handler, and rejects peers whose `SO_PEERCRED` UID differs. A
-  remote `GApplication` instance never emits `startup` and never binds.
-- Mutations are accepted whenever the agent is attached and the tool's
-  toolset is enabled on the broker. The handshake reports versions and
-  capabilities only.
-- The agent reads only `GTK_MCP_DIR` (socket location) and removes nothing
-  from its process environment. GTK presets set by `launch_app`
-  (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are inherited by children.
-- Every request runs on the GTK main thread through the agent's executor; the
-  socket thread never touches GTK. A main loop that doesn't pick a request up
-  before its deadline yields `target_unresponsive` with `started: false`.
+- Your app depends on `gtk-mcp-agent` behind a Cargo feature. Release builds
+  leave the feature off.
+- The only switch is at compile time: the `#[cfg]` line at the call site,
+  `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or just the feature).
+  If `attach` is called, the agent runs. If you remove `debug_assertions`
+  from the line, release builds get the agent too. No environment variable
+  turns it on or off.
+- When the application starts up (its `startup` handler), the agent opens a
+  socket at `$XDG_RUNTIME_DIR/gtk-mcp/<pid>.sock`. The directory is `0700`
+  and the socket `0600`. `GTK_MCP_DIR` changes the directory. The agent
+  checks each peer's user id with `SO_PEERCRED` and turns away other users.
+  A second copy of a `GApplication` that only forwards to the first one
+  never gets `startup`, so it never opens a socket.
+- Tools that change things run whenever the agent is attached and their
+  toolset is turned on in the broker. The handshake only reports versions
+  and capabilities.
+- The only environment variable the agent reads is `GTK_MCP_DIR` (the socket
+  location). It doesn't remove anything from the process environment. GTK
+  presets that `launch_app` sets (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`,
+  …) are passed on to the app's child processes.
+- Every request runs on the GTK main thread through the agent's executor.
+  The socket thread never touches GTK. If the main loop doesn't pick up a
+  request before its deadline, the answer is `target_unresponsive` with
+  `started: false`.
 
 ## Rust / Relm4: minimal integration
 
@@ -47,15 +49,15 @@ gtk-mcp = ["dep:gtk-mcp-agent"]
 gtk-mcp-agent = { version = "0.1", optional = true }
 ```
 
-The agent depends on the same gtk-rs majors as the app (`gtk4 0.11`,
-`glib 0.22`). `gtk4-sys` declares `links = "gtk-4"`, so incompatible majors
-fail Cargo resolution rather than building. The agent compiles against the
-GTK 4.10 API floor and resolves newer symbols at runtime, so it never raises
-the app's minimum GTK version. It does not link libadwaita or
-gtk4-layer-shell; it reaches them through GType names, GObject properties, and
-`dlsym` when they are already loaded.
+The agent uses the same gtk-rs major versions as your app (`gtk4 0.11`,
+`glib 0.22`). `gtk4-sys` declares `links = "gtk-4"`, so mismatched versions
+fail when Cargo resolves dependencies instead of building something broken.
+The agent is built against GTK 4.10 and looks up newer functions at runtime,
+so it never raises the GTK version your app needs. It doesn't link
+libadwaita or gtk4-layer-shell. When those are already loaded, it reaches
+them through GType names, GObject properties and `dlsym`.
 
-`main.rs` — one call after the application object exists, on the main thread:
+`main.rs`: one call on the main thread, after the application object exists:
 
 ```rust
 let app = RelmApp::new(app_id.as_str()).visible_on_activate(false);
@@ -67,10 +69,10 @@ app.with_args(vec![]).run::<app::App>(init);
 ```
 
 `RelmApp::new` already calls `gtk::init()`. `attach` starts the executor and
-connects to `startup`; the socket appears once the application registers, and
+hooks into `startup`. The socket appears once the application registers, and
 requests are served while the main loop runs.
 
-Plain gtk-rs is the same call with your own application:
+With plain gtk-rs it's the same call on your own application:
 
 ```rust
 let app = adw::Application::builder().application_id(APP_ID).build();
@@ -79,12 +81,12 @@ gtk_mcp_agent::attach(&app);
 app.run()
 ```
 
-That is the entire required integration. Everything below is optional.
+That's all you need. Everything below is optional.
 
 ## Stable targets without a dependency
 
-`automation_id` is the widget name when set explicitly. App code needs no
-agent import:
+If you set a widget name, that name is its `automation_id`. Your app code
+doesn't need to import the agent for this:
 
 ```rust
 view! {
@@ -100,24 +102,26 @@ let entry = gtk::Entry::new();
 entry.set_widget_name("server-address");
 ```
 
-Agents then target `{"automation_id": "panel-clock"}` regardless of label text
-or locale. Widget names are also CSS IDs (`#panel-clock`).
+The agent can then target `{"automation_id": "panel-clock"}` whatever the
+label says and whatever language the app is in. Widget names are also CSS
+IDs (`#panel-clock`).
 
-The same name can exist once per window (glimpse runs one panel per output).
-Combine it with a window selector:
+The same name can appear once in each window. glimpse, for example, runs one
+panel per monitor. Add a window selector to pick one:
 `{"window": {"monitor": "DP-1"}, "automation_id": "panel-clock"}`.
 
 ## Optional adapter API
 
 | Function | Purpose |
 |---|---|
-| `register_state(name, Fn() -> serde_json::Value)` | Expose app state as a read-only MCP resource; closure runs on the main thread |
-| `mark_secret(&widget)` | Add a widget (and its descendants, delegate, buffers) to the secret set |
-| `register_action_group(&widget, prefix, &group)` | Make groups inserted with `insert_action_group` listable |
-| `forward_log(level, fields)` | Forward records from the app's own GLib log writer to `read_logs` |
+| `register_state(name, Fn() -> serde_json::Value)` | Share app state as a read-only MCP resource. The closure runs on the main thread |
+| `register_settings(&settings)` | Tell the GSettings tools which `gio::Settings` object the app uses |
+| `mark_secret(&widget)` | Add a widget (and its children, delegate and buffers) to the secret set |
+| `register_action_group(&widget, prefix, &group)` | Make groups added with `insert_action_group` show up in lists |
+| `forward_log(level, fields)` | Pass records from the app's own GLib log writer on to `read_logs` |
 
-All are no-ops when the agent is inactive. Calls go through one app-local
-module so the rest of the code never touches `cfg`:
+They all do nothing when the agent isn't active. Put the calls in one module
+in your app, so the rest of the code never needs a `cfg`:
 
 ```rust
 // src/mcp.rs
@@ -146,7 +150,8 @@ pub fn forward_log(_level: glib::LogLevel, _fields: &[glib::LogField<'_>]) {}
 
 ### App state as MCP resources
 
-The closure can borrow `Rc` state. The app owns the schema and the redaction.
+The closure can borrow `Rc` state. Your app decides what the JSON looks like
+and what to leave out.
 
 ```rust
 let panels = Rc::clone(&self.panels);
@@ -159,56 +164,60 @@ crate::mcp::register_state("app-state/panels", move || {
 });
 ```
 
-Re-registering a name replaces the previous closure. This is also how
-session-lock state is exposed: gtk4-session-lock has no getters the agent
+Registering the same name again replaces the old closure. This is also how
+to share session-lock state, since gtk4-session-lock has no getters the agent
 could call.
 
-Serving these to MCP clients is gated behind the broker's `app` toolset:
-start the broker with `--toolsets core,app` (the default is `core` only).
-Otherwise the broker does not advertise the resources capability and
-`resources/list` returns an empty list even though the app registered state.
-With the toolset on, each entry is exposed as the MCP resource
-`gtk-mcp://<session>/app-state/<name>` (JSON, e.g.
-`gtk-mcp://s1/app-state/panels`) and readable with `resources/read`.
+MCP clients only see these resources when the broker's `app` toolset is on.
+Start the broker with `--toolsets core,app` (the default is just `core`).
+Without it, the broker doesn't offer resources at all, and `resources/list`
+returns an empty list even if the app registered state. With the toolset on,
+each entry becomes the MCP resource `gtk-mcp://<session>/app-state/<name>`
+(JSON, for example `gtk-mcp://s1/app-state/panels`), which you read with
+`resources/read`.
 
 ### Secrets
 
-Detected without app code (`plan.md` 4.4): `GtkPasswordEntry`;
-`GtkEntry` / `GtkText` with `input-purpose` `password` or `pin`, or with
-`visibility=false` when first observed; `AdwPasswordEntryRow`. Detection
-covers the widget's descendants, its editable delegate, and its buffer, and
-stays in force while the peek icon reveals the text. Anything else sensitive
-is marked explicitly:
+The agent finds these on its own (`plan.md` 4.4):
+
+- `GtkPasswordEntry`;
+- `GtkEntry` / `GtkText` with `input-purpose` `password` or `pin`, or with
+  `visibility=false` when the agent first sees it;
+- `AdwPasswordEntryRow`.
+
+This covers the widget's children, its editable delegate and its buffer. It
+stays in force while the eye icon shows the text. Mark anything else
+sensitive yourself:
 
 ```rust
 crate::mcp::mark_secret(&token_label);
 ```
 
-Captures of non-peeking password fields show GTK's bullets; captures and
-render-node dumps of a peeking field are refused. Captures still contain any
-unmarked sensitive pixels; do not enable the agent on sessions with real
-credentials on screen.
+A capture of a password field that is hiding its text shows GTK's bullets.
+Captures and render-node dumps of a field that is showing its text are
+refused. Captures can still contain other sensitive pixels you didn't mark,
+so don't run the agent while real credentials are on screen.
 
 ### Widget-scoped action groups
 
-Groups inserted with `insert_action_group` are not enumerable through public
-GTK API:
+Public GTK API can't list groups added with `insert_action_group`. Register
+them so the agent can:
 
 ```rust
 widget.insert_action_group("panel", Some(&group));
 crate::mcp::register_action_group(&widget, "panel", &group);
 ```
 
-Unregistered groups still activate by name; `list_actions` reports the scope
-as `complete: false`.
+Groups you don't register can still be activated by name. `list_actions`
+then reports the scope as `complete: false`.
 
 ### Logs
 
-The agent never installs a GLib log writer (libraries must not, and a second
-installation aborts). Logs come from:
+The agent never installs a GLib log writer. Libraries must not, and
+installing a second one aborts the program. Logs come from two places:
 
-- stderr of broker-launched apps (GTK's default structured writer prints
-  there), captured by the broker;
+- stderr of apps the broker launched (GTK's default structured writer prints
+  there), which the broker captures;
 - apps that install their own writer and call `forward_log` from it.
 
 Otherwise `read_logs` reports `unavailable`.
@@ -221,11 +230,11 @@ glib::log_set_writer_func(|level, fields| {
 });
 ```
 
-The forwarded record is `{level, domain, message, fields}` (`GLIB_DOMAIN` and
-`MESSAGE` are lifted out; other string fields stay in `fields`, binary fields
-are skipped). Records forwarded before a broker connects are kept (512) and
-delivered at the handshake. `forward_log` is a Rust API; the C ABI has no
-wrapper yet.
+A forwarded record looks like `{level, domain, message, fields}`.
+`GLIB_DOMAIN` and `MESSAGE` are pulled out, other text fields stay in
+`fields`, and binary fields are skipped. Records forwarded before a broker
+connects are kept (up to 512) and sent at the handshake. `forward_log` is
+Rust only; the C library has no wrapper for it.
 
 ## What `attach` does
 
@@ -269,32 +278,36 @@ pub fn attach(app: &impl IsA<gtk::Application>) {
 }
 ```
 
-The socket thread parses frames, forwards requests and cancels into the
-channel, and writes responses and notifications produced by the executor.
-Only `Send` data crosses threads: JSON and encoded PNG bytes. Objects and refs
-live in the main-thread registry.
+The socket thread reads messages, passes requests and cancels into the
+channel, and writes out the responses and notifications the executor
+produces. Only `Send` data, which is safe to move between threads, crosses
+over: JSON and encoded PNG bytes. GTK objects and refs stay in the registry
+on the main thread.
 
 ## glimpse
 
+glimpse is a desktop shell built with GTK, and the main app this project was
+made for.
+
 - Each glimpse process (panel, lock, wallpaper, notifications, …) attaches
-  separately and appears as its own session, distinguished by app ID.
-- Layer-shell configuration shows in `list_windows` (gtk4-layer-shell is
-  already loaded in these processes). Session-lock state comes only from
+  on its own and shows up as its own session, told apart by app ID.
+- `list_windows` shows the layer-shell settings, because gtk4-layer-shell is
+  already loaded in these processes. Session-lock state comes only from
   `register_state`.
-- glimpse-lock: its password field is a `GtkPasswordEntry` with the peek
-  icon; it is detected as secret, and captures are refused while it peeks.
-  Keep the agent out of lock builds at compile time if mutations are not
-  wanted there.
-- glimpse runs under systemd: the agent is in or out at build time (Cargo
-  feature + `#[cfg]` mark); no environment drop-in is needed or read.
-  `restart_app` / `stop_app` refuse these
-  processes because the broker did not launch them.
+- glimpse-lock: its password field is a `GtkPasswordEntry` with the eye icon.
+  The agent treats it as secret and refuses captures while it shows its text.
+  If you don't want the agent changing things in the lock screen, leave it
+  out of lock builds at compile time.
+- glimpse runs under systemd. The agent is in or out at build time (Cargo
+  feature plus the `#[cfg]` line), so you don't need a systemd drop-in for
+  environment variables. `restart_app` and `stop_app` refuse these
+  processes because the broker didn't launch them.
 
 ## Other languages
 
-`gtk-mcp-agent-capi` builds a C library with a header and a
-GObject-introspection typelib. `attach` initializes gtk-rs's flag from the
-host's already-initialized GTK.
+`gtk-mcp-agent-capi` builds a C library with a header and a GObject
+Introspection typelib, so C, Python and GJS apps can use it. `attach` tells
+gtk-rs that GTK is already initialized, since the host app did that.
 
 ```c
 #include <gtk-mcp-agent.h>
@@ -311,4 +324,4 @@ import GtkMcp from 'gi://GtkMcp';
 GtkMcp.attach(app);
 ```
 
-Same compile-time gating and socket contract.
+The compile-time switch and the socket work the same way.
