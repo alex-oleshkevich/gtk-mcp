@@ -18,14 +18,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Cached .deb set: the runner's apt mirror can be slow enough to stall a run.
-      - name: Install system libraries
-        uses: awalsh128/cache-apt-pkgs-action@v1
+      # Downloaded .debs are cached: the runner's apt mirror can be slow enough
+      # to stall a run.
+      - uses: actions/cache@v4
         with:
-          packages: >-
-            libgtk-4-dev libglib2.0-dev libadwaita-1-dev libgtk4-layer-shell-dev
+          path: ~/apt-archives
+          key: apt-qa-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Install system libraries
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get update
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" \
+            libgtk-4-dev libglib2.0-dev libadwaita-1-dev libgtk4-layer-shell-dev \
             pkg-config gobject-introspection python3-gi gjs
-          version: "1"
+          sudo chown -R "$USER" ~/apt-archives
 
       - uses: dtolnay/rust-toolchain@stable
         with:

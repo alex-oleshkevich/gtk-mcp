@@ -40,12 +40,19 @@ jobs:
 
       # The release ships the broker and the agent C library. The fixture app is
       # test-only and needs gtk4-layer-shell, which does not exist on macOS.
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: ~/apt-archives
+          key: apt-release-${{ runner.os }}-${{ runner.arch }}-v1
+
       - name: Install GTK 4 (Linux)
         if: runner.os == 'Linux'
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: libgtk-4-dev libglib2.0-dev pkg-config
-          version: "1"
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get update
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" libgtk-4-dev libglib2.0-dev pkg-config
+          sudo chown -R "$USER" ~/apt-archives
 
       - name: Install GTK 4 (macOS)
         if: runner.os == 'macOS'

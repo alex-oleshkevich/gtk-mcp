@@ -92,7 +92,11 @@ fn same_process(a: (u32, Option<u64>), b: (u32, Option<u64>)) -> bool {
     a.0 == b.0 && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
 }
 
-fn peer_cred(stream: &UnixStream) -> io::Result<libc::ucred> {
+/// Peer `(uid, pid)` of a connected Unix socket. Linux reads `SO_PEERCRED`
+/// (the pid that called listen(2)); macOS reads `getpeereid` and
+/// `LOCAL_PEERPID`.
+#[cfg(target_os = "linux")]
+fn peer_cred(stream: &UnixStream) -> io::Result<(u32, i32)> {
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     let rc = unsafe {
@@ -104,7 +108,22 @@ fn peer_cred(stream: &UnixStream) -> io::Result<libc::ucred> {
             &mut len,
         )
     };
-    if rc != 0 { Err(io::Error::last_os_error()) } else { Ok(cred) }
+    if rc != 0 { Err(io::Error::last_os_error()) } else { Ok((cred.uid, cred.pid)) }
+}
+
+#[cfg(target_os = "macos")]
+fn peer_cred(stream: &UnixStream) -> io::Result<(u32, i32)> {
+    let fd = stream.as_raw_fd();
+    let (mut uid, mut gid) = (0 as libc::uid_t, 0 as libc::gid_t);
+    if unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(fd, libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&mut pid as *mut libc::pid_t).cast(), &mut len)
+    };
+    if rc != 0 { Err(io::Error::last_os_error()) } else { Ok((uid, pid)) }
 }
 
 /// Start time of process `pid` in clock ticks since boot (field 22 of
@@ -124,15 +143,15 @@ pub(crate) fn handshake(path: &Path, pid: u32, timeout: Duration) -> Result<Hand
         io::ErrorKind::NotFound => HandshakeError::Gone,
         _ => HandshakeError::Other(format!("connect: {e}")),
     })?;
-    // SO_PEERCRED reports the effective uid of the listening process.
+    // The peer credentials report the effective uid of the listening process.
     let euid = unsafe { libc::geteuid() };
     match peer_cred(&stream) {
-        Ok(c) if c.uid != euid => return Err(HandshakeError::Other(format!("peer uid {} differs from ours", c.uid))),
-        Ok(c) if u32::try_from(c.pid).ok() != Some(pid) => {
-            return Err(HandshakeError::Other(format!("socket is named after pid {pid} but served by pid {}", c.pid)));
+        Ok((uid, _)) if uid != euid => return Err(HandshakeError::Other(format!("peer uid {uid} differs from ours"))),
+        Ok((_, peer_pid)) if u32::try_from(peer_pid).ok() != Some(pid) => {
+            return Err(HandshakeError::Other(format!("socket is named after pid {pid} but served by pid {peer_pid}")));
         }
         Ok(_) => {}
-        Err(e) => return Err(HandshakeError::Other(format!("SO_PEERCRED: {e}"))),
+        Err(e) => return Err(HandshakeError::Other(format!("peer credentials: {e}"))),
     }
     let io_err = |what: &str, e: io::Error| HandshakeError::Other(format!("{what}: {e}"));
     stream.set_write_timeout(Some(Duration::from_secs(10))).map_err(|e| io_err("set_write_timeout", e))?;

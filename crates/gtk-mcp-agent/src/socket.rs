@@ -118,7 +118,8 @@ impl SocketHandle {
     }
 }
 
-/// UID of the peer of `stream` (`SO_PEERCRED`).
+/// UID of the peer of `stream` (`SO_PEERCRED` on Linux, `getpeereid` on macOS).
+#[cfg(target_os = "linux")]
 pub fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
     use std::os::fd::AsRawFd;
     let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
@@ -137,6 +138,18 @@ pub fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
         return Err(std::io::Error::last_os_error());
     }
     Ok(cred.uid)
+}
+
+/// UID of the peer of `stream` (`SO_PEERCRED` on Linux, `getpeereid` on macOS).
+#[cfg(target_os = "macos")]
+pub fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
+    use std::os::fd::AsRawFd;
+    let (mut uid, mut gid) = (0 as libc::uid_t, 0 as libc::gid_t);
+    // SAFETY: valid fd, valid out-parameters.
+    if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(uid)
 }
 
 fn prepare_dir(dir: &Path) -> std::io::Result<()> {
