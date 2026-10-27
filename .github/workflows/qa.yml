@@ -17,22 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install GTK 4 development libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libglib2.0-dev libadwaita-1-dev pkg-config gobject-introspection python3-gi gjs
-          if ! pkg-config --exists gtk4-layer-shell-0; then
-            sudo apt-get install -y libgtk4-layer-shell-dev || true
-          fi
-          if ! pkg-config --exists gtk4-layer-shell-0; then
-            sudo apt-get install -y meson ninja-build git libwayland-dev wayland-protocols gobject-introspection libgirepository1.0-dev
-            git clone --depth 1 https://github.com/wmww/gtk4-layer-shell /tmp/gtk4-layer-shell
-            meson setup /tmp/gls-build /tmp/gtk4-layer-shell -Ddocs=false -Dtests=false -Dexamples=false -Dintrospection=false -Dvapi=false
-            meson compile -C /tmp/gls-build
-            sudo meson install -C /tmp/gls-build
-            sudo ldconfig
-          fi
-          pkg-config --exists gtk4-layer-shell-0
+
+      # Cached .deb set: the runner's apt mirror can be slow enough to stall a run.
+      - name: Install system libraries
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            libgtk-4-dev libglib2.0-dev libadwaita-1-dev libgtk4-layer-shell-dev
+            pkg-config gobject-introspection python3-gi gjs
+          version: "1"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,7 +39,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      # The tree currently has clippy warnings and is not rustfmt-clean,
-      # so neither is a gate yet. This step keeps warnings visible.
+      # The tree still has clippy warnings and is not rustfmt-clean, so neither
+      # gates the run yet. This step keeps the warnings visible.
       - name: Clippy (not gated)
         run: cargo clippy --workspace --all-targets

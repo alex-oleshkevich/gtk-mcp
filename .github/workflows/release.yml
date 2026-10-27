@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  # Manual runs build every platform but never publish a release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -36,26 +38,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The release ships the broker and the agent C library. The fixture app is
+      # test-only and needs gtk4-layer-shell, which does not exist on macOS.
       - name: Install GTK 4 (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libglib2.0-dev libadwaita-1-dev pkg-config
-          if ! pkg-config --exists gtk4-layer-shell-0; then
-            sudo apt-get install -y libgtk4-layer-shell-dev || true
-          fi
-          if ! pkg-config --exists gtk4-layer-shell-0; then
-            sudo apt-get install -y meson ninja-build git libwayland-dev wayland-protocols gobject-introspection libgirepository1.0-dev
-            git clone --depth 1 https://github.com/wmww/gtk4-layer-shell /tmp/gtk4-layer-shell
-            meson setup /tmp/gls-build /tmp/gtk4-layer-shell -Ddocs=false -Dtests=false -Dexamples=false -Dintrospection=false -Dvapi=false
-            meson compile -C /tmp/gls-build
-            sudo meson install -C /tmp/gls-build
-            sudo ldconfig
-          fi
-          pkg-config --exists gtk4-layer-shell-0
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libgtk-4-dev libglib2.0-dev pkg-config
+          version: "1"
 
       - name: Install GTK 4 (macOS)
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install gtk4 glib pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
@@ -67,20 +62,17 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --workspace --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} -p gtk-mcp -p gtk-mcp-agent-capi
 
       - name: Package
         shell: bash
         run: |
           cd "target/${{ matrix.target }}/release"
-          files=()
-          for f in gtk-mcp gtk-mcp-fixture; do
-            [ -f "$f" ] && files+=("$f")
-          done
+          files=(gtk-mcp)
           for lib in libgtk_mcp_agent_capi.so libgtk_mcp_agent_capi.dylib; do
             [ -f "$lib" ] && files+=("$lib")
           done
-          test -f gtk-mcp
+          test "${#files[@]}" -eq 2
           tar -czf "$GITHUB_WORKSPACE/gtk-mcp-${GITHUB_REF_NAME}-${{ matrix.name }}.tar.gz" "${files[@]}"
 
       - uses: actions/upload-artifact@v4
@@ -91,6 +83,7 @@ jobs:
 
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
