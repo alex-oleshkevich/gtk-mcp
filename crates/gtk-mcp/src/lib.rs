@@ -3,6 +3,8 @@
 //! tests can drive [`Broker::call_tool`] directly.
 
 pub mod a11y;
+pub mod cli;
+pub mod doctor;
 pub mod broker;
 pub mod diagnostics;
 pub mod diff;

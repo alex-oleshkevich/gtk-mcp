@@ -109,6 +109,19 @@ Then ask your coding agent to take a look. A typical round goes like this. `list
 
 `--toolsets` picks the tools your client sees. The default is `core`. Add `app` if you registered state, and `a11y` for accessibility checks. The `a11y` tools also need `--allow-atspi`, and the app must be started with `GTK_A11Y=atspi`. `--allow-launch` lets the broker start and stop apps itself. It comes with presets, for example for in-app file choosers or testing translations.
 
+## Command line
+
+The same binary has a few commands for the shell. With no command, `gtk-mcp` runs the MCP server, so existing client configs keep working.
+
+```sh
+gtk-mcp doctor                                   # checks the socket directory, every app socket and the AT-SPI bus
+gtk-mcp apps                                     # lists running apps: session, pid, app id, GTK version, state
+gtk-mcp tools                                    # lists every tool by toolset, R for read-only and M for mutating
+gtk-mcp call capture '{"target":"w1"}' -o a.png  # runs one tool and saves the picture
+```
+
+`doctor` only reads. It exits 1 when the socket directory is unusable or an app fails its handshake. `call` takes the tool name, the arguments as JSON (or `-` to read them from stdin) and `--app` with a session id, a pid or an app id. You can leave `--app` out when only one app runs. Results are printed as JSON, errors go to stderr and exit with 1. Every toolset is on for `call`. `--allow-launch` and `--allow-atspi` work as they do for the server. `--json` on `doctor`, `apps` and `tools` gives machine output.
+
 ## Security
 
 The agent only exists in builds where you compiled the `attach` call in. The socket is readable only by your user. Before the broker talks to an app, it checks that the app runs as your user and is the process the socket is named after.

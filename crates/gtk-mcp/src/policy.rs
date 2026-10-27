@@ -89,12 +89,20 @@ pub struct Config {
 
 impl Config {
     pub fn default_socket_dir() -> PathBuf {
+        Self::socket_dir_source().0
+    }
+
+    /// The default socket directory and where it came from.
+    pub fn socket_dir_source() -> (PathBuf, &'static str) {
         if let Some(d) = std::env::var_os("GTK_MCP_DIR").filter(|d| !d.is_empty()) {
-            return PathBuf::from(d);
+            return (PathBuf::from(d), "GTK_MCP_DIR");
         }
         match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-            Some(d) => PathBuf::from(d).join("gtk-mcp"),
-            None => PathBuf::from(format!("/tmp/gtk-mcp-{}", unsafe { libc::getuid() })),
+            Some(d) => (PathBuf::from(d).join("gtk-mcp"), "XDG_RUNTIME_DIR"),
+            None => (
+                PathBuf::from(format!("/tmp/gtk-mcp-{}", unsafe { libc::getuid() })),
+                "fallback (neither GTK_MCP_DIR nor XDG_RUNTIME_DIR is set)",
+            ),
         }
     }
 

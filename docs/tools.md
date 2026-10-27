@@ -16,6 +16,8 @@ The broker flag `--toolsets` picks which groups of tools are offered. The defaul
 
 A target is either a ref (`w12`, `o4`) or a selector (see `plan.md` section 7). Actions are addressed as `{scope, name}`. Tools that change something accept `observe` and return the state after the change. If the change worked but reading the state back failed, you get both results, and nothing is retried.
 
+You can run any tool from the shell with `gtk-mcp call <tool> [ARGS_JSON]`. It uses the same code as the MCP server, with every toolset enabled, and prints the result as JSON. Use `gtk-mcp tools` to list the names, and `--app` to pick an app when several run. Apps started by `call launch_app` stop when the command exits.
+
 ## core
 
 | Tool | | Purpose |
