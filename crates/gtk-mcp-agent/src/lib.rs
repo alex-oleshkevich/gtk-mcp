@@ -1,7 +1,8 @@
 //! Embedded GTK agent (`docs/plan.md` 4.2, `docs/embedding.md`).
 //!
 //! One call, on the main thread after the application object exists:
-//! `gtk_mcp_agent::attach(&app)`. The agent is inert unless `GTK_MCP=1`.
+//! `gtk_mcp_agent::attach(&app)`. Calling it activates the agent; the only
+//! gate is compile time (the developer's `#[cfg(...)]` at the call site).
 
 pub mod actions;
 pub mod agent;
@@ -29,11 +30,14 @@ pub use secrecy::mark_secret;
 pub use state::{register_settings, register_state};
 
 /// Attach the agent to `app`. Must be called on the main thread after
-/// `gtk::init`. Inert (and idempotent) unless `GTK_MCP=1`; always removes
-/// `GTK_MCP*` from the process environment so child processes are not
-/// instrumented.
+/// `gtk::init`. Idempotent; activates unconditionally when called (the
+/// socket is bound on startup). The socket directory comes from
+/// `GTK_MCP_DIR`, else `$XDG_RUNTIME_DIR/gtk-mcp`.
 pub fn attach(app: &impl IsA<gtk::Application>) {
-    let Some(config) = config::Config::take_from_env() else { return };
+    let Some(config) = config::Config::from_env() else {
+        eprintln!("gtk-mcp: no socket directory (GTK_MCP_DIR and XDG_RUNTIME_DIR both unset); agent not started");
+        return;
+    };
     if Agent::current().is_some() {
         return;
     }

@@ -210,13 +210,13 @@ fn stdio_list_apps_uses_gtk_mcp_dir_and_returns_json() {
 }
 
 #[test]
-fn stdio_tool_error_is_an_error_result_with_agent_error_json() {
+fn stdio_mutating_tool_forwards_without_any_flag() {
     let dir = tempfile::tempdir().unwrap();
     let _mock = MockAgent::start(dir.path());
     let mut c = Client::start(dir.path(), &[]);
-    // mutations are off: the call must come back as isError with the typed error
+    // no mutation gate: the call is forwarded to the agent (mock echoes it)
     let r = c.call("tools/call", json!({"name":"interact","arguments":{"target":"w1","operation":"activate"}}));
-    assert_eq!(r["result"]["isError"], true, "{r}");
-    let e: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(e["code"], "mutations_disabled");
+    assert_ne!(r["result"]["isError"], true, "{r}");
+    let v: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(v["echo"], "interact");
 }

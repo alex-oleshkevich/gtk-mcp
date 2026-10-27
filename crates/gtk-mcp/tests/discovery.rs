@@ -16,7 +16,7 @@ async fn list(b: &std::sync::Arc<gtk_mcp::Broker>) -> Vec<Value> {
 #[tokio::test]
 async fn discovery_running_mock_is_listed_with_hello() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = MockAgent::builder(dir.path()).ack(|a| a.mutations_enabled = true).start();
+    let mock = MockAgent::builder(dir.path()).start();
     let b = broker_with(dir.path(), Policy::default(), |_| {});
     let apps = list(&b).await;
     assert_eq!(apps.len(), 1);
@@ -30,7 +30,6 @@ async fn discovery_running_mock_is_listed_with_hello() {
     assert_eq!(hello.gtk_version, [4, 22, 1]);
     assert_eq!(hello.adw_version, Some([1, 9, 0]));
     assert_eq!(hello.capabilities, vec![Capability::Adwaita, Capability::AccessibleId]);
-    assert!(hello.mutations_enabled);
     // ids are stable across rescans
     assert_eq!(list(&b).await[0]["session"], "s1");
 }
@@ -92,7 +91,7 @@ async fn discovery_hung_handshake_is_skipped_not_unlinked() {
 async fn discovery_protocol_mismatch_is_incompatible() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockAgent::builder(dir.path()).ack(|a| a.protocol = 99).start();
-    let b = broker_with(dir.path(), allow_all(), |_| {});
+    let b = broker_with(dir.path(), Policy::default(), |_| {});
     let apps = list(&b).await;
     assert_eq!(apps[0]["state"], "incompatible");
     assert_eq!(apps[0]["hello"]["protocol"], 99);

@@ -24,7 +24,7 @@ impl Server {
         self.run("audit_accessibility", p, ctx).await
     }
 
-    #[tool(description = "Walk the Tab chain of a window with gtk_widget_child_focus and report order, loops, focus traps and focusable widgets never reached; the previous focus is restored. Side effects possible: scroll-to-focus, popover autohide, select-on-focus. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Walk the Tab chain of a window with gtk_widget_child_focus and report order, loops, focus traps and focusable widgets never reached; the previous focus is restored. Side effects possible: scroll-to-focus, popover autohide, select-on-focus.", annotations(destructive_hint = true))]
     async fn trace_focus_order(&self, Parameters(p): Parameters<TraceFocusOrderParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("trace_focus_order", p, ctx).await
     }

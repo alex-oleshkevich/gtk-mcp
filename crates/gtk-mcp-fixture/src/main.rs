@@ -51,8 +51,9 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     root.set_margin_start(12);
     root.set_margin_end(12);
     root.append(&counter);
-    // Reports GTK_MCP* variables still visible to std::env after attach (must be none).
-    let leaked: Vec<String> = std::env::vars().map(|(k, _)| k).filter(|k| k.starts_with("GTK_MCP")).collect();
+    // Reports agent GTK_MCP* variables visible to std::env (not scrubbed; the
+    // harness sets only GTK_MCP_DIR). GTK_MCP_TEST* are test-harness variables.
+    let leaked: Vec<String> = std::env::vars().map(|(k, _)| k).filter(|k| k.starts_with("GTK_MCP") && !k.starts_with("GTK_MCP_TEST")).collect();
     let env_report = named(
         gtk::Label::new(Some(&format!("gtk-mcp-env: {}", if leaked.is_empty() { "none".to_string() } else { leaked.join(",") }))),
         "env-report",

@@ -1,7 +1,7 @@
 /* gtk-mcp-agent.h: C API of the gtk-mcp embedded agent (libgtk_mcp_agent_capi).
  *
  * Every function must be called on the GTK main thread, after GTK is
- * initialized, and is inert unless the process environment has GTK_MCP=1.
+ * initialized. Calling gtk_mcp_agent_attach() activates the agent.
  * The library links the host's libgtk-4 dynamically; it does not embed GTK.
  * NULL instances are ignored; instances of the wrong type are refused with a
  * critical, as GTK's own functions do.
@@ -25,7 +25,7 @@ G_BEGIN_DECLS
  */
 typedef char *(*GtkMcpStateFunc) (gpointer user_data);
 
-/** Attach the agent to @app. Idempotent; inert unless GTK_MCP=1. */
+/** Attach the agent to @app. Idempotent; activates the agent when called. */
 void gtk_mcp_agent_attach (GtkApplication *app);
 
 /** Mark @object (normally a widget) as secret: its values are never returned. */

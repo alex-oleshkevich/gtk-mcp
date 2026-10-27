@@ -41,7 +41,7 @@ async fn dispatch_deadline_formulas() {
                 .respond("batch", json!({"steps":[]}))
                 .start()
         },
-        allow_all(),
+        Policy::default(),
         10_000,
     );
     b.call_tool("wait_for", json!({"condition":"exists","target":"w1","timeout_ms":100})).await.unwrap();
@@ -102,11 +102,11 @@ async fn dispatch_late_result_lands_in_event_buffer() {
     let (_d, mock, b) = setup(
         |d| {
             MockAgent::builder(d)
-                .mutations(true)
+                
                 .script("set_property", vec![Step::Started, Step::Sleep(500), Step::LateResult(json!({"observed":42}))])
                 .start()
         },
-        allow_all(),
+        Policy::default(),
         200,
     );
     let e = b
@@ -231,38 +231,11 @@ async fn dispatch_excluded_tool_is_absent_from_dispatch() {
     assert_eq!(e.data, Some(json!({"step": 1})), "steps are numbered from 1, as in the agent and $N.ref");
 }
 
-// -- mutation gate ----------------------------------------------------------
-
 #[tokio::test]
-async fn dispatch_mutation_gate_broker_flag_off() {
-    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(true).start(), Policy::default(), 10_000);
-    let e = b.call_tool("interact", interact()).await.unwrap_err();
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
-    b.call_tool("list_windows", json!({"session":"s1"})).await.unwrap();
-    let methods: Vec<String> = mock.requests().into_iter().map(|r| r.1).collect();
-    assert_eq!(methods, vec!["list_windows"], "the mutating request was never sent");
-}
-
-#[tokio::test]
-async fn dispatch_mutation_gate_agent_flag_off() {
-    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(false).start(), allow_all(), 10_000);
-    for (tool, args) in [
-        ("interact", interact()),
-        ("set_property", json!({"session":"s1","target":"w1","name":"x","value":1})),
-        ("edit_text", json!({"session":"s1","target":"w1","operation":"delete","start":0,"end":1})),
-    ] {
-        let e = b.call_tool(tool, args).await.unwrap_err();
-        assert_eq!(e.code, ErrorCode::MutationsDisabled, "{tool}");
-    }
-    b.call_tool("list_windows", json!({"session":"s1"})).await.unwrap();
-    assert_eq!(mock.requests().len(), 1);
-}
-
-#[tokio::test]
-async fn dispatch_mutation_gate_both_on_forwards() {
+async fn dispatch_mutation_forwards_without_any_flag() {
     let (_d, mock, b) = setup(
-        |d| MockAgent::builder(d).mutations(true).respond("interact", json!({"target":"w1","observed":{}})).start(),
-        allow_all(),
+        |d| MockAgent::builder(d).respond("interact", json!({"target":"w1","observed":{}})).start(),
+        Policy::default(),
         10_000,
     );
     let out = b.call_tool("interact", interact()).await.unwrap();
@@ -277,7 +250,7 @@ async fn dispatch_mutation_gate_both_on_forwards() {
 /// deadline.
 #[tokio::test]
 async fn dispatch_too_deeply_nested_request_fails_at_once() {
-    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(true).start(), allow_all(), 30_000);
+    let (_d, mock, b) = setup(|d| MockAgent::builder(d).start(), Policy::default(), 30_000);
     let value = (0..MAX_FRAME_NESTING).fold(json!(1), |v, _| json!([v]));
     let t = std::time::Instant::now();
     let e = b.call_tool("set_property", json!({"session":"s1","target":"w1","name":"x","value":value})).await.unwrap_err();
@@ -291,7 +264,7 @@ async fn dispatch_too_deeply_nested_request_fails_at_once() {
 // -- batch ------------------------------------------------------------------
 
 #[tokio::test]
-async fn batch_read_only_runs_with_mutations_off() {
+async fn batch_read_only_runs() {
     let (_d, mock, b) = setup(|d| MockAgent::builder(d).respond("batch", json!({"steps":[]})).start(), Policy::default(), 10_000);
     let steps = json!([
         {"tool":"query","arguments":{"selector":{"text":"Save"}}},
@@ -305,17 +278,18 @@ async fn batch_read_only_runs_with_mutations_off() {
 }
 
 #[tokio::test]
-async fn batch_with_mutating_step_needs_the_gate() {
-    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(true).start(), Policy::default(), 10_000);
+async fn batch_with_mutating_step_forwards_without_any_flag() {
+    let (_d, mock, b) = setup(|d| MockAgent::builder(d).respond("batch", json!({"steps":[]})).start(), Policy::default(), 10_000);
     let steps = json!([{"tool":"list_windows","arguments":{}},{"tool":"interact","arguments":{"target":"w1","operation":"activate"}}]);
-    let e = b.call_tool("batch", json!({"session":"s1","steps":steps})).await.unwrap_err();
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
-    assert!(mock.requests().is_empty());
+    b.call_tool("batch", json!({"session":"s1","steps":steps})).await.unwrap();
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].1, "batch");
 }
 
 #[tokio::test]
 async fn batch_invalid_step_sends_nothing() {
-    let (_d, mock, b) = setup(|d| MockAgent::builder(d).mutations(true).start(), allow_all(), 10_000);
+    let (_d, mock, b) = setup(|d| MockAgent::builder(d).start(), Policy::default(), 10_000);
     b.call_tool("list_apps", json!({})).await.unwrap();
     let bad_cases = vec![
         json!([{"tool":"list_windows","arguments":{}},{"tool":"query","arguments":{"selector":{}}},{"tool":"no_such_tool","arguments":{}}]),

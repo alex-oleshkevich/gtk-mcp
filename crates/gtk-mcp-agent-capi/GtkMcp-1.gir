@@ -24,7 +24,7 @@
       </parameters>
     </callback>
     <function name="attach" c:identifier="gtk_mcp_agent_attach">
-      <doc xml:space="preserve">Attach the agent to @app. Inert unless GTK_MCP=1.</doc>
+      <doc xml:space="preserve">Attach the agent to @app. Activates the agent when called.</doc>
       <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
       <parameters>
         <parameter name="app" transfer-ownership="none">

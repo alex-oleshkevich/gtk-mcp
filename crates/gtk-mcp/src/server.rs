@@ -90,7 +90,7 @@ impl Server {
 
 #[tool_router]
 impl Server {
-    #[tool(description = "List instrumented GTK apps (sessions): pid, app id, GTK/libadwaita versions, capabilities, mutations_enabled, state (running, incompatible, exited). Rescans the socket directory.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
+    #[tool(description = "List instrumented GTK apps (sessions): pid, app id, GTK/libadwaita versions, capabilities, state (running, incompatible, exited). Rescans the socket directory.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true))]
     async fn list_apps(&self, Parameters(p): Parameters<EmptyParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("list_apps", p, ctx).await
     }
@@ -130,7 +130,7 @@ impl Server {
         self.run("get_property", p, ctx).await
     }
 
-    #[tool(description = "Write a property and return the observed value. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Write a property and return the observed value.", annotations(destructive_hint = true))]
     async fn set_property(&self, Parameters(p): Parameters<SetPropertyParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("set_property", p, ctx).await
     }
@@ -140,7 +140,7 @@ impl Server {
         self.run("list_signals", p, ctx).await
     }
 
-    #[tool(description = "Typed semantic operation (activate, focus, fill, set_checked, set_active, set_value, set_expanded, select, select_page, popup, popdown, scroll_to, scroll_by, close, play, pause, seek) with state readback. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Typed semantic operation (activate, focus, fill, set_checked, set_active, set_value, set_expanded, select, select_page, popup, popdown, scroll_to, scroll_by, close, play, pause, seek) with state readback.", annotations(destructive_hint = true))]
     async fn interact(&self, Parameters(p): Parameters<InteractParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("interact", p, ctx).await
     }
@@ -150,7 +150,7 @@ impl Server {
         self.run("inspect_text", p, ctx).await
     }
 
-    #[tool(description = "Insert, delete, replace text ranges or set the selection. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Insert, delete, replace text ranges or set the selection.", annotations(destructive_hint = true))]
     async fn edit_text(&self, Parameters(p): Parameters<EditTextParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("edit_text", p, ctx).await
     }
@@ -195,17 +195,17 @@ impl Server {
         self.run("inspect_style", p, ctx).await
     }
 
-    #[tool(description = "Install temporary CSS on the display; parse diagnostics with line/column (invalid CSS installs nothing); returns a handle. Reverted by remove_css or when this client disconnects. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Install temporary CSS on the display; parse diagnostics with line/column (invalid CSS installs nothing); returns a handle. Reverted by remove_css or when this client disconnects.", annotations(destructive_hint = true))]
     async fn apply_css(&self, Parameters(p): Parameters<ApplyCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("apply_css", p, ctx).await
     }
 
-    #[tool(description = "Remove one temporary CSS provider by handle. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Remove one temporary CSS provider by handle.", annotations(destructive_hint = true))]
     async fn remove_css(&self, Parameters(p): Parameters<RemoveCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("remove_css", p, ctx).await
     }
 
-    #[tool(description = "Outline a widget for a human (temporary provider + class gtk-mcp-highlight), clearing this client's previous highlight; omit target to just clear. Reverted on disconnect. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Outline a widget for a human (temporary provider + class gtk-mcp-highlight), clearing this client's previous highlight; omit target to just clear. Reverted on disconnect.", annotations(destructive_hint = true))]
     async fn highlight(&self, Parameters(p): Parameters<HighlightParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("highlight", p, ctx).await
     }
@@ -220,12 +220,12 @@ impl Server {
         self.run("inspect_settings", p, ctx).await
     }
 
-    #[tool(description = "Session-scoped override of color_scheme, animations, text_scale or text_direction; reverted on disconnect. libadwaita high contrast and accent are read-only. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Session-scoped override of color_scheme, animations, text_scale or text_direction; reverted on disconnect. libadwaita high contrast and accent are read-only.", annotations(destructive_hint = true))]
     async fn override_setting(&self, Parameters(p): Parameters<OverrideSettingParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("override_setting", p, ctx).await
     }
 
-    #[tool(description = "Launch an app (argv, no shell) under broker control with GTK presets (no_portals, instance_count, a11y, language, gsk_renderer, gtk_debug), optional wayland_display/xdg_runtime_dir, cwd and env (GTK_MCP* rejected). stdout/stderr are captured; waits for the app's agent socket and returns the session. Needs --allow-launch.", annotations(destructive_hint = true))]
+    #[tool(description = "Launch an app (argv, no shell) under broker control with GTK presets (no_portals, instance_count, a11y, language, gsk_renderer, gtk_debug), optional wayland_display/xdg_runtime_dir, cwd and env. stdout/stderr are captured; waits for the app's agent socket and returns the session. Needs --allow-launch.", annotations(destructive_hint = true))]
     async fn launch_app(&self, Parameters(p): Parameters<LaunchAppParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("launch_app", p, ctx).await
     }
@@ -240,7 +240,7 @@ impl Server {
         self.run("stop_app", p, ctx).await
     }
 
-    #[tool(description = "g_application_open with files (paths or URIs, optional hint), or g_application_activate. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "g_application_open with files (paths or URIs, optional hint), or g_application_activate.", annotations(destructive_hint = true))]
     async fn app_open(&self, Parameters(p): Parameters<AppOpenParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("app_open", p, ctx).await
     }
@@ -250,7 +250,7 @@ impl Server {
         self.run("inspect_gsettings", p, ctx).await
     }
 
-    #[tool(description = "Write a GSettings key (JSON value converted by the key's type, or GVariant text) with type and range validation; returns the previous and observed values. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Write a GSettings key (JSON value converted by the key's type, or GVariant text) with type and range validation; returns the previous and observed values.", annotations(destructive_hint = true))]
     async fn set_gsetting(&self, Parameters(p): Parameters<SetGsettingParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("set_gsetting", p, ctx).await
     }
@@ -278,7 +278,7 @@ impl ServerHandler for Server {
         let caps = if self.broker.resources_enabled() { caps.enable_resources().build() } else { caps.build() };
         ServerConfig::new(caps)
             .with_server_info(rmcp::model::Implementation::new("gtk-mcp", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Inspect and exercise a running GTK4 app from inside its process. Call list_apps first; `session` may be omitted when exactly one app is running. Mutating tools need --allow-mutations on the broker and GTK_MCP_MUTATIONS=1 in the app; launch_app, restart_app and stop_app need --allow-launch. With the `app` toolset, state the app registered with register_state is served as resources gtk-mcp://<session>/app-state/<name>.")
+            .with_instructions("Inspect and exercise a running GTK4 app from inside its process. Call list_apps first; `session` may be omitted when exactly one app is running. launch_app, restart_app and stop_app need --allow-launch. With the `app` toolset, state the app registered with register_state is served as resources gtk-mcp://<session>/app-state/<name>.")
     }
 
     async fn list_resources(

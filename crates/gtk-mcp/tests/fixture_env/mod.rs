@@ -240,12 +240,13 @@ impl Drop for Fixture {
 }
 
 impl Fixture {
-    /// Start the fixture with the agent active. `extra_env` may override anything.
-    pub fn start(display: &Display, mutations: bool, extra_env: &[(&str, &str)]) -> Fixture {
+    /// Start the fixture. `attach` activates the agent unconditionally; the
+    /// harness sets only `GTK_MCP_DIR` (the socket location). `extra_env` may
+    /// override anything.
+    pub fn start(display: &Display, extra_env: &[(&str, &str)]) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let mut cmd = Command::new(fixture_binary());
-        cmd.env("GTK_MCP", "1")
-            .env("GTK_MCP_DIR", dir.path())
+        cmd.env("GTK_MCP_DIR", dir.path())
             .env("XDG_RUNTIME_DIR", &display.xdg_runtime_dir)
             .env("WAYLAND_DISPLAY", &display.wayland_display)
             .env("GDK_BACKEND", "wayland")
@@ -253,9 +254,6 @@ impl Fixture {
             .env("GTK_A11Y", "none")
             .stdout(Stdio::null())
             .stderr(Stdio::from(std::fs::File::create(dir.path().join("fixture.stderr")).unwrap()));
-        if mutations {
-            cmd.env("GTK_MCP_MUTATIONS", "1");
-        }
         for (k, v) in extra_env {
             cmd.env(k, v);
         }
@@ -284,9 +282,8 @@ impl Fixture {
         self.dir.path().join(format!("{}.sock", self.pid))
     }
 
-    pub fn broker(&self, allow_mutations: bool) -> Arc<Broker> {
-        let policy = Policy { allow_mutations, ..Policy::default() };
-        Broker::new(policy, Config::with_socket_dir(self.dir.path())).unwrap()
+    pub fn broker(&self) -> Arc<Broker> {
+        Broker::new(Policy::default(), Config::with_socket_dir(self.dir.path())).unwrap()
     }
 }
 

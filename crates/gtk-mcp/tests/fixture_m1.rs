@@ -18,7 +18,7 @@ fn by_id(id: &str) -> Value {
 }
 
 fn rw(fx: &Fixture) -> Client {
-    Client { broker: fx.broker(true) }
+    Client { broker: fx.broker() }
 }
 
 async fn counter(c: &Client) -> String {
@@ -35,7 +35,7 @@ fn decode_png(b: &[u8]) -> image::RgbaImage {
 #[tokio::test(flavor = "multi_thread")]
 async fn interact_set_expanded_reads_back_and_is_idempotent() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     for _ in 0..2 {
         let r = c.json("interact", json!({"target": by_id("advanced-expander"), "operation": "set_expanded", "expanded": true})).await;
@@ -54,7 +54,7 @@ async fn interact_set_expanded_reads_back_and_is_idempotent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn interact_operations_and_errors() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c.json("interact", json!({"target": by_id("save-primary"), "operation": "activate"})).await;
     assert_eq!(r["observed"]["activated"], true);
@@ -89,29 +89,12 @@ async fn interact_operations_and_errors() {
     assert!(r["observed"].is_object());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn interact_mutations_disabled_in_broker_or_agent() {
-    let display = require_display!();
-    // agent side off, broker on
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(true) };
-    let e = c.err("interact", json!({"target": by_id("save-primary"), "operation": "activate"})).await;
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
-    assert_eq!(counter(&c).await, "clicks: 0");
-    // broker side off, agent on
-    let fx2 = Fixture::start(&display, true, &[]);
-    let c2 = Client { broker: fx2.broker(false) };
-    let e = c2.err("interact", json!({"target": by_id("save-primary"), "operation": "activate"})).await;
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
-    assert_eq!(counter(&c2).await, "clicks: 0");
-}
-
 // ---- AC-3 --------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
 async fn targets_ambiguous_interact_detached_then_stale() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let e = c.err("interact", json!({"target": {"text": "Save", "type_name": "GtkButton"}, "operation": "activate"})).await;
     assert_eq!(e.code, ErrorCode::AmbiguousTarget);
@@ -140,7 +123,7 @@ async fn targets_ambiguous_interact_detached_then_stale() {
 #[tokio::test(flavor = "multi_thread")]
 async fn capture_settled_after_expand_and_unmapped_target() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let before = c.call("capture", json!({"target": by_id("advanced-expander")})).await.unwrap();
     let before_meta = before.json_content().unwrap();
@@ -197,7 +180,7 @@ async fn capture_settled_after_expand_and_unmapped_target() {
 #[tokio::test(flavor = "multi_thread")]
 async fn secrets_never_leave_the_agent() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let mut seen: Vec<String> = Vec::new();
     macro_rules! rec {
@@ -280,7 +263,7 @@ const SEEDED: &str = "stalwart-ember-7-quill";
 #[tokio::test(flavor = "multi_thread")]
 async fn set_property_cannot_unseal_an_unobserved_secret() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let target = json!({"type_name": "GtkEntry", "automation_id": "seeded-pass"});
     let mut seen: Vec<String> = Vec::new();
@@ -325,7 +308,7 @@ const MARKED: &[&str] = &["vault-notes-SECRET-71c2"];
 #[tokio::test(flavor = "multi_thread")]
 async fn marked_secrets_cover_shared_buffers() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let mut seen: Vec<String> = Vec::new();
 
@@ -370,7 +353,7 @@ async fn marked_secrets_cover_shared_buffers() {
 #[tokio::test(flavor = "multi_thread")]
 async fn capture_after_peek_off_never_serves_the_peeking_frame() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     c.json("interact", json!({"target": by_id("password"), "operation": "fill", "text": SECRET})).await;
     let win = c.json("list_windows", json!({})).await["windows"][0]["ref"].clone();
@@ -443,13 +426,13 @@ async fn capture_after_peek_off_never_serves_the_peeking_frame() {
 fn short_deadline_broker(fx: &Fixture, ms: u64) -> Arc<Broker> {
     let mut cfg = Config::with_socket_dir(fx.dir.path());
     cfg.default_deadline_ms = ms;
-    Broker::new(Policy { allow_mutations: true, ..Policy::default() }, cfg).unwrap()
+    Broker::new(Policy::default(), cfg).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dispatch_blocked_main_loop_is_unresponsive_and_nothing_runs_after_unblocking() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = Client { broker: short_deadline_broker(&fx, 1000) };
     c.json("list_apps", json!({})).await;
     // Block the main loop for 5 s; the blocking call itself outlives its 1 s deadline.
@@ -478,7 +461,7 @@ async fn dispatch_blocked_main_loop_is_unresponsive_and_nothing_runs_after_unblo
 #[tokio::test(flavor = "multi_thread")]
 async fn dispatch_started_mutation_past_deadline_becomes_late_result() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = Client { broker: short_deadline_broker(&fx, 1000) };
     c.json("list_apps", json!({})).await;
     let e = c.err("interact", json!({"target": by_id("slow-op"), "operation": "activate"})).await;
@@ -504,7 +487,7 @@ async fn dispatch_started_mutation_past_deadline_becomes_late_result() {
 #[tokio::test(flavor = "multi_thread")]
 async fn batch_runs_steps_with_refs_and_a_settled_capture() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c
         .json(
@@ -533,9 +516,9 @@ async fn png_retained(c: &Client, id: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn batch_invalid_step_executes_nothing_and_readonly_runs_without_mutations() {
+async fn batch_invalid_step_executes_nothing_and_readonly_runs() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let e = c
         .err(
@@ -552,9 +535,9 @@ async fn batch_invalid_step_executes_nothing_and_readonly_runs_without_mutations
     let e = c.err("batch", json!({"steps": [{"tool": "batch", "arguments": {"steps": []}}]})).await;
     assert_eq!(e.code, ErrorCode::InvalidParams);
 
-    // read-only batch with mutations off everywhere
-    let fx2 = Fixture::start(&display, false, &[]);
-    let c2 = Client { broker: fx2.broker(false) };
+    // read-only batch on a fresh fixture
+    let fx2 = Fixture::start(&display, &[]);
+    let c2 = Client { broker: fx2.broker() };
     let r = c2
         .json(
             "batch",
@@ -565,9 +548,10 @@ async fn batch_invalid_step_executes_nothing_and_readonly_runs_without_mutations
         )
         .await;
     assert!(r["steps"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{r}");
-    // a mutating step with mutations off is refused as a whole
-    let e = c2.err("batch", json!({"steps": [{"tool": "interact", "arguments": {"target": by_id("save-primary"), "operation": "activate"}}]})).await;
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
+    // a mutating step runs without any flag
+    let r = c2.json("batch", json!({"steps": [{"tool": "interact", "arguments": {"target": by_id("save-primary"), "operation": "activate"}}]})).await;
+    assert!(r["steps"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{r}");
+    assert_eq!(counter(&c2).await, "clicks: 1");
     // stop_on_error default and override
     let r = c
         .json(
@@ -598,7 +582,7 @@ async fn batch_invalid_step_executes_nothing_and_readonly_runs_without_mutations
 #[tokio::test(flavor = "multi_thread")]
 async fn properties_and_signals() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let l = c.json("list_properties", json!({"target": by_id("save-primary"), "owner": "GtkButton"})).await;
     assert!(l["properties"].as_array().unwrap().iter().any(|p| p["name"] == "label" && p["writable"] == true));
@@ -622,7 +606,7 @@ async fn properties_and_signals() {
 #[tokio::test(flavor = "multi_thread")]
 async fn text_and_model_tools() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let t = c.json("inspect_text", json!({"target": by_id("notes")})).await;
     assert_eq!(t["text"], "hello notes");
@@ -644,7 +628,7 @@ async fn text_and_model_tools() {
 #[tokio::test(flavor = "multi_thread")]
 async fn wait_for_sensitive_after_fill_and_timeout_is_not_an_error() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = Arc::new(rw(&fx));
     let waiter = {
         let c = c.clone();
@@ -666,7 +650,7 @@ async fn wait_for_sensitive_after_fill_and_timeout_is_not_an_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn interact_observe_and_observation_failure_keeps_the_mutation() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c
         .json(
@@ -690,7 +674,7 @@ async fn interact_observe_and_observation_failure_keeps_the_mutation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn diff_snapshots_reports_expander_child_changes() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let a = c.snapshot_json(json!({})).await;
     c.json("interact", json!({"target": by_id("advanced-expander"), "operation": "set_expanded", "expanded": true})).await;
@@ -710,7 +694,7 @@ async fn diff_snapshots_reports_expander_child_changes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn secret_buffer_cannot_be_rehomed_to_plain_entry() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let mut seen: Vec<String> = Vec::new();
     macro_rules! rec {

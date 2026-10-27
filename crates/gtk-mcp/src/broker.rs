@@ -287,7 +287,7 @@ impl Broker {
         }
 
         // Everything that can be wrong with the params is wrong before anything is sent.
-        let mutating = self.classify(spec, &args)?;
+        self.classify(spec, &args)?;
         let session = self.resolve_session(&session_arg).await?;
 
         match name {
@@ -312,20 +312,6 @@ impl Broker {
         if let Some(e) = session.unavailable() {
             return Err(e);
         }
-        if mutating {
-            if !self.policy.allow_mutations {
-                return Err(AgentError::new(
-                    ErrorCode::MutationsDisabled,
-                    format!("'{name}' mutates the app; start the broker with --allow-mutations"),
-                ));
-            }
-            if !session.mutations_enabled() {
-                return Err(AgentError::new(
-                    ErrorCode::MutationsDisabled,
-                    format!("'{name}' mutates the app; start session {} with GTK_MCP_MUTATIONS=1", session.id()),
-                ));
-            }
-        }
         if name == "watch" && args["kind"] == "atspi" {
             let p: gtk_mcp_protocol::WatchParams = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
             if p.target.is_some() {
@@ -346,10 +332,10 @@ impl Broker {
         self.finish(name, &session, &args, result)
     }
 
-    /// Whether the call mutates; for `batch`, validates every step first.
-    fn classify(&self, spec: &ToolSpec, args: &Value) -> Result<bool, AgentError> {
+    /// Validate the call's params; for `batch`, validates every step first.
+    fn classify(&self, spec: &ToolSpec, args: &Value) -> Result<(), AgentError> {
         if spec.name != "batch" {
-            return Ok(spec.mutating);
+            return Ok(());
         }
         let p: BatchParams =
             serde_json::from_value(args.clone()).map_err(|e| invalid(format!("invalid params for 'batch': {e}")))?;
@@ -359,7 +345,6 @@ impl Broker {
         if p.steps.len() > MAX_BATCH_STEPS {
             return Err(invalid(format!("batch has {} steps; the maximum is {MAX_BATCH_STEPS}", p.steps.len())));
         }
-        let mut mutating = false;
         // Steps are numbered from 1, as in the agent's validation and `$N.ref`.
         for (n, step) in (1..).zip(&p.steps) {
             let at = |msg: String| invalid(format!("batch step {n}: {msg}")).with_data(serde_json::json!({"step": n}));
@@ -367,9 +352,8 @@ impl Broker {
             if !self.is_enabled(s.name) {
                 return Err(at(format!("tool '{}' is not enabled", s.name)));
             }
-            mutating |= s.mutating;
         }
-        Ok(mutating)
+        Ok(())
     }
 
     fn deadline_ms(&self, name: &str, args: &Value) -> u64 {

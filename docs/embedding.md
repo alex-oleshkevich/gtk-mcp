@@ -15,19 +15,21 @@ flowchart LR
 
 - The app links `gtk-mcp-agent` behind a Cargo feature that release builds do
   not enable.
-- With the feature compiled in, the agent is inert unless `GTK_MCP=1` is set
-  at runtime. `launch_app` sets it; for apps started elsewhere (systemd unit,
-  session script) set it in a dev drop-in.
+- The only gate is compile time: the developer's mark at the call site,
+  `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or the feature
+  alone). Calling `attach` activates the agent unconditionally; removing
+  `debug_assertions` from the mark enables it in release builds. There is
+  no runtime environment gate.
 - The agent binds `$XDG_RUNTIME_DIR/gtk-mcp/<pid>.sock` (directory `0700`,
   socket `0600`; `GTK_MCP_DIR` overrides the directory) in the application's
   `startup` handler, and rejects peers whose `SO_PEERCRED` UID differs. A
   remote `GApplication` instance never emits `startup` and never binds.
-- Mutations need both broker `--allow-mutations` and app
-  `GTK_MCP_MUTATIONS=1`; the agent reports its side in the handshake.
-- After reading `GTK_MCP*`, the agent removes those variables from its process
-  environment, so apps your app launches are not instrumented. GTK presets set
-  by `launch_app` (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are inherited by
-  them.
+- Mutations are accepted whenever the agent is attached and the tool's
+  toolset is enabled on the broker. The handshake reports versions and
+  capabilities only.
+- The agent reads only `GTK_MCP_DIR` (socket location) and removes nothing
+  from its process environment. GTK presets set by `launch_app`
+  (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are inherited by children.
 - Every request runs on the GTK main thread through the agent's executor; the
   socket thread never touches GTK. A main loop that doesn't pick a request up
   before its deadline yields `target_unresponsive` with `started: false`.
@@ -229,7 +231,7 @@ wrapper yet.
 
 ```rust
 pub fn attach(app: &impl IsA<gtk::Application>) {
-    let Some(config) = Config::take_from_env() else { return }; // reads and removes GTK_MCP*
+    let Some(config) = Config::from_env() else { return }; // GTK_MCP_DIR or $XDG_RUNTIME_DIR/gtk-mcp
     ensure_gtk_rs_initialized();          // gtk_is_initialized() via FFI, then gtk::set_initialized()
 
     let (tx, rx) = async_channel::unbounded::<Incoming>();
@@ -279,11 +281,13 @@ live in the main-thread registry.
 - Layer-shell configuration shows in `list_windows` (gtk4-layer-shell is
   already loaded in these processes). Session-lock state comes only from
   `register_state`.
-- glimpse-lock: keep `GTK_MCP_MUTATIONS` unset. Its password field is a
-  `GtkPasswordEntry` with the peek icon; it is detected as secret, and captures
-  are refused while it peeks.
-- glimpse runs under systemd: enable the agent with a dev drop-in
-  (`Environment=GTK_MCP=1`). `restart_app` / `stop_app` refuse these
+- glimpse-lock: its password field is a `GtkPasswordEntry` with the peek
+  icon; it is detected as secret, and captures are refused while it peeks.
+  Keep the agent out of lock builds at compile time if mutations are not
+  wanted there.
+- glimpse runs under systemd: the agent is in or out at build time (Cargo
+  feature + `#[cfg]` mark); no environment drop-in is needed or read.
+  `restart_app` / `stop_app` refuse these
   processes because the broker did not launch them.
 
 ## Other languages
@@ -307,4 +311,4 @@ import GtkMcp from 'gi://GtkMcp';
 GtkMcp.attach(app);
 ```
 
-Same environment gating and socket contract.
+Same compile-time gating and socket contract.

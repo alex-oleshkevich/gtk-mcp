@@ -121,7 +121,6 @@ impl Agent {
             gtk_version: [gtk::major_version(), gtk::minor_version(), gtk::micro_version()],
             adw_version: adw,
             capabilities: caps,
-            mutations_enabled: self.config.mutations,
         }
     }
 }
@@ -203,15 +202,9 @@ impl Ctx {
 /// Run a tool by name (also used by `batch` for its steps).
 pub fn run_tool<'a>(agent: &'a Rc<Agent>, tool: &'a str, params: Value, ctx: &'a Ctx) -> BoxFut<'a, Result<Value, AgentError>> {
     Box::pin(async move {
-        let spec = tool_spec(tool)
+        tool_spec(tool)
             .filter(|s| s.agent)
             .ok_or_else(|| AgentError::new(ErrorCode::NotFound, format!("unknown method '{tool}'")))?;
-        if spec.mutating && tool != "batch" && !agent.config.mutations {
-            return Err(AgentError::new(
-                ErrorCode::MutationsDisabled,
-                "this app was started without GTK_MCP_MUTATIONS=1",
-            ));
-        }
         ctx.check()?;
         tools::dispatch(agent, tool, params, ctx).await
     })

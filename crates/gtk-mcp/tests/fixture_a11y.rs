@@ -153,10 +153,9 @@ fn by_id(id: &str) -> Value {
     json!({"automation_id": id})
 }
 
-fn start_fixture(display: &Display, bus: &PrivateBus, mutations: bool) -> Fixture {
+fn start_fixture(display: &Display, bus: &PrivateBus) -> Fixture {
     Fixture::start(
         display,
-        mutations,
         &[
             ("GTK_A11Y", "atspi"),
             ("DBUS_SESSION_BUS_ADDRESS", bus.address.as_str()),
@@ -166,9 +165,8 @@ fn start_fixture(display: &Display, bus: &PrivateBus, mutations: bool) -> Fixtur
     )
 }
 
-fn broker(fx: &Fixture, bus: &PrivateBus, atspi: bool, mutations: bool) -> Client {
+fn broker(fx: &Fixture, bus: &PrivateBus, atspi: bool) -> Client {
     let policy = Policy {
-        allow_mutations: mutations,
         allow_atspi: atspi,
         toolsets: vec!["core".into(), "a11y".into(), "diagnostics".into()],
         ..Policy::default()
@@ -206,8 +204,8 @@ async fn wait_exported(c: &Client) -> Value {
 async fn a11y_join_rate_on_fixture() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, false);
-    let c = broker(&fx, bus, true, false);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     let t = wait_exported(&c).await;
     let stats = &t["atspi"]["join"];
@@ -232,8 +230,8 @@ async fn a11y_join_rate_on_fixture() {
 async fn a11y_inspect_accessible_tags_each_field_with_its_source() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, false);
-    let c = broker(&fx, bus, true, false);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     wait_exported(&c).await;
 
@@ -260,8 +258,8 @@ async fn a11y_inspect_accessible_tags_each_field_with_its_source() {
 async fn a11y_source_off_reports_atspi_fields_unavailable_and_rules_skipped() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, false);
-    let c = broker(&fx, bus, false, false);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, false);
     c.settle_tree().await;
 
     let r = c.json("inspect_accessible", json!({"target": by_id("a11y-labeled")})).await;
@@ -294,8 +292,8 @@ async fn a11y_source_off_reports_atspi_fields_unavailable_and_rules_skipped() {
 async fn a11y_audit_finds_unnamed_controls_with_evidence() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, false);
-    let c = broker(&fx, bus, true, false);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     let tree = wait_exported(&c).await;
     let unlabeled = by_auto(&tree, "a11y-icon-unlabeled")["ref"].as_str().unwrap().to_string();
@@ -332,8 +330,8 @@ async fn a11y_audit_finds_unnamed_controls_with_evidence() {
 async fn a11y_secret_widgets_are_redacted() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, true);
-    let c = broker(&fx, bus, true, true);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     wait_exported(&c).await;
     c.json("interact", json!({"target": by_id("password"), "operation": "fill", "text": "hunter2-SECRET-0xC0FFEE"})).await;
@@ -353,8 +351,8 @@ async fn a11y_secret_widgets_are_redacted() {
 async fn a11y_accessible_tree_root_and_depth() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, false);
-    let c = broker(&fx, bus, true, false);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     wait_exported(&c).await;
     let sub = c.json("accessible_tree", json!({"root": by_id("a11y-tabs")})).await;
@@ -371,8 +369,8 @@ async fn a11y_accessible_tree_root_and_depth() {
 async fn a11y_trace_focus_order_reports_chain_and_restores_focus() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, true);
-    let c = broker(&fx, bus, false, true);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, false);
     c.settle_tree().await;
     c.json("interact", json!({"target": by_id("a11y-tab-3"), "operation": "focus"})).await;
 
@@ -404,18 +402,14 @@ async fn a11y_trace_focus_order_reports_chain_and_restores_focus() {
     let un: Vec<&str> = s["unreachable"].as_array().unwrap().iter().filter_map(|n| n["automation_id"].as_str()).collect();
     assert!(!un.contains(&"a11y-unfocusable"), "unfocusable widgets are not candidates: {un:?}");
 
-    // Mutating tool: refused without the broker flag.
-    let ro = broker(&fx, bus, false, false);
-    let e = ro.err("trace_focus_order", json!({})).await;
-    assert_eq!(e.code, gtk_mcp_protocol::ErrorCode::MutationsDisabled);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a11y_focus_event_carries_the_joined_ref() {
     let display = require_display!();
     let bus = require_bus!();
-    let fx = start_fixture(&display, bus, true);
-    let c = broker(&fx, bus, true, true);
+    let fx = start_fixture(&display, bus);
+    let c = broker(&fx, bus, true);
     c.settle_tree().await;
     let tree = wait_exported(&c).await;
     let target = by_auto(&tree, "a11y-tab-2")["ref"].as_str().unwrap().to_string();
@@ -450,6 +444,6 @@ async fn a11y_focus_event_carries_the_joined_ref() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(c.json("read_events", json!({"since": stopped, "kind": "atspi"})).await["entries"].as_array().unwrap().is_empty());
 
-    let ro = broker(&fx, bus, false, true);
+    let ro = broker(&fx, bus, false);
     assert_eq!(ro.err("watch", json!({"kind": "atspi"})).await.code, gtk_mcp_protocol::ErrorCode::Unavailable);
 }

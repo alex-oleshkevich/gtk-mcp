@@ -219,7 +219,7 @@ int main (void) {
   if (gtk_objs != 1) { printf ("libgtk-4 loaded %d times\n", gtk_objs); return 2; }
   void *self = dlopen (NULL, RTLD_NOW);
   if (dlsym (self, "gtk_mcp_agent_attach") == NULL) return 3;
-  /* inert: GTK_MCP is unset, nothing may happen and no GTK init is needed */
+  /* no agent attached (NULL app): nothing may happen and no GTK init is needed */
   gtk_mcp_agent_attach (NULL);
   gtk_mcp_agent_mark_secret (NULL);
   gtk_mcp_agent_register_action_group (NULL, "x", NULL);
@@ -237,7 +237,6 @@ int main (void) {
     let exe = a.out.join("inert");
     compile_c(&src, &exe, &a.out);
     let mut cmd = Command::new(&exe);
-    cmd.env_remove("GTK_MCP");
     assert_eq!(run(&mut cmd, "inert C program").trim(), "ok");
 }
 
@@ -271,7 +270,7 @@ int main (void) {
     compile_c(&src, &exe, &a.out);
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = Command::new(&exe);
-    cmd.env("GTK_MCP", "1").env("GTK_MCP_DIR", dir.path());
+    cmd.env("GTK_MCP_DIR", dir.path());
     let out = run(&mut cmd, "wrong-types C program");
     assert!(out.contains("ok"), "{out}");
     for expected in [
@@ -310,8 +309,7 @@ fn typelib_imports_from_python_and_gjs() {
 
 fn spawn_app(display: &Display, a: &Artifacts, mut cmd: Command) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    cmd.env("GTK_MCP", "1")
-        .env("GTK_MCP_DIR", dir.path())
+    cmd.env("GTK_MCP_DIR", dir.path())
         .env("XDG_RUNTIME_DIR", &display.xdg_runtime_dir)
         .env("WAYLAND_DISPLAY", &display.wayland_display)
         .env("GDK_BACKEND", "wayland")

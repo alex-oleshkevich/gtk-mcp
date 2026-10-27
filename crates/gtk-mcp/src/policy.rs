@@ -11,7 +11,6 @@ pub struct Policy {
     /// When set, only these tools (which must belong to a selected toolset).
     pub tools: Option<Vec<String>>,
     pub exclude_tools: Vec<String>,
-    pub allow_mutations: bool,
     pub allow_launch: bool,
     /// Enables the AT-SPI source (`a11y` toolset joins, AT-SPI events).
     pub allow_atspi: bool,
@@ -23,7 +22,6 @@ impl Default for Policy {
             toolsets: vec!["core".into()],
             tools: None,
             exclude_tools: Vec::new(),
-            allow_mutations: false,
             allow_launch: false,
             allow_atspi: false,
         }

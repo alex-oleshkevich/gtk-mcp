@@ -37,9 +37,9 @@ fn by_title<'a>(w: &'a Value, title: &str) -> Option<&'a Value> {
 #[tokio::test(flavor = "multi_thread")]
 async fn plain_window_has_no_layer_shell_with_library_loaded() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = Client {
-        broker: fx.broker(false),
+        broker: fx.broker(),
     };
     // The library really is loaded: the agent advertises the capability.
     let apps = c.json("list_apps", json!({})).await;
@@ -69,9 +69,9 @@ async fn plain_window_has_no_layer_shell_with_library_loaded() {
 #[tokio::test(flavor = "multi_thread")]
 async fn layer_panel_reports_exact_layer_shell() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[("FIXTURE_LAYER_PANEL", "1")]);
+    let fx = Fixture::start(&display, &[("FIXTURE_LAYER_PANEL", "1")]);
     let c = Client {
-        broker: fx.broker(false),
+        broker: fx.broker(),
     };
     let w = windows_until(&c, "layer panel", |w| {
         by_title(w, "gtk-mcp fixture panel").is_some_and(|p| p.get("layer_shell").is_some())
@@ -111,9 +111,9 @@ async fn layer_panel_reports_exact_layer_shell() {
 #[tokio::test(flavor = "multi_thread")]
 async fn session_lock_window_has_no_layer_shell() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[("FIXTURE_SESSION_LOCK", "1")]);
+    let fx = Fixture::start(&display, &[("FIXTURE_SESSION_LOCK", "1")]);
     let c = Client {
-        broker: fx.broker(false),
+        broker: fx.broker(),
     };
     let w = windows_until(&c, "session-lock window", |w| {
         by_title(w, "gtk-mcp fixture lock").is_some()

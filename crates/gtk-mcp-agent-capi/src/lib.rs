@@ -3,8 +3,8 @@
 //! The library links GTK dynamically (`libgtk-4.so` is `NEEDED`, never
 //! embedded), so it binds to the GTK the host process already loaded. It never
 //! links libadwaita or gtk4-layer-shell. Every function must be called on the
-//! host's GTK main thread; all of them are inert unless the agent is active
-//! (`GTK_MCP=1`). The header is `include/gtk-mcp-agent.h`; `GtkMcp-1.gir`
+//! host's GTK main thread; the agent is active once `gtk_mcp_agent_attach`
+//! has been called. The header is `include/gtk-mcp-agent.h`; `GtkMcp-1.gir`
 //! describes the same functions for GObject introspection.
 
 use glib::translate::{FromGlibPtrBorrow, IntoGlib};

@@ -21,12 +21,12 @@ impl Server {
         self.run("inspect_action", p, ctx).await
     }
 
-    #[tool(description = "Activate an action with a typed parameter (JSON converted by the action's parameter type; invalid -> invalid_value). Returns the observed state afterwards. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Activate an action with a typed parameter (JSON converted by the action's parameter type; invalid -> invalid_value). Returns the observed state afterwards.", annotations(destructive_hint = true))]
     async fn activate_action(&self, Parameters(p): Parameters<ActivateActionParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("activate_action", p, ctx).await
     }
 
-    #[tool(description = "Request a state change of a stateful action; returns the observed state and accepted=false when the app rejected or altered the request. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Request a state change of a stateful action; returns the observed state and accepted=false when the app rejected or altered the request.", annotations(destructive_hint = true))]
     async fn change_action_state(&self, Parameters(p): Parameters<ChangeActionStateParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("change_action_state", p, ctx).await
     }
@@ -46,7 +46,7 @@ impl Server {
         self.run("inspect_shortcuts", p, ctx).await
     }
 
-    #[tool(description = "Match a keyval trigger (e.g. <Control>s) against shortcut controllers from the focus widget upward plus managed/global ones and run its GtkShortcutAction. Comparison only, not a key press; not_found when nothing matches. Needs --allow-mutations and GTK_MCP_MUTATIONS=1 in the app.", annotations(destructive_hint = true))]
+    #[tool(description = "Match a keyval trigger (e.g. <Control>s) against shortcut controllers from the focus widget upward plus managed/global ones and run its GtkShortcutAction. Comparison only, not a key press; not_found when nothing matches.", annotations(destructive_hint = true))]
     async fn activate_shortcut(&self, Parameters(p): Parameters<ActivateShortcutParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("activate_shortcut", p, ctx).await
     }

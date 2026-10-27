@@ -6,8 +6,8 @@ Scope: GTK, GDK, GSK, GIO application state, and libadwaita, inspected and
 exercised from inside the application process. Real input, desktop capture,
 clipboard, window placement, and compositor state belong to `../wayland-mcp`.
 
-`R` = read-only. `M` = mutating: needs broker `--allow-mutations` **and**
-`GTK_MCP_MUTATIONS=1` in the app; otherwise `mutations_disabled`. Lifecycle
+`R` = read-only. `M` = mutating: runs whenever its toolset is enabled (the
+only gate is compile time in the app; see `embedding.md`). Lifecycle
 tools (`launch_app`, `restart_app`, `stop_app`) need broker `--allow-launch`
 instead. Tool annotations follow the same split.
 
@@ -23,9 +23,9 @@ reported and nothing is retried.
 
 | Tool | | Purpose |
 |---|---|---|
-| `list_apps` | R | Sessions: PID, app ID, GTK/libadwaita versions, capabilities, `mutations_enabled`, state (`running`, `incompatible`, `exited` with code/signal, in-flight request, retained logs/events), `launched_by_broker` |
+| `list_apps` | R | Sessions: PID, app ID, GTK/libadwaita versions, capabilities, state (`running`, `incompatible`, `exited` with code/signal, in-flight request, retained logs/events), `launched_by_broker` |
 | `list_windows` | R | Toplevels and mapped native surfaces (popovers): title, visibility, size, refs, renderer, surface scale, monitor connector, modal / transient-for / default widget, layer-shell configuration when gtk4-layer-shell is loaded |
-| `launch_app` | M | Broker-launched argv (no shell) with GTK presets (`GDK_DEBUG=no-portals`, `GOBJECT_DEBUG=instance-count`, `GTK_A11Y`, `LANGUAGE`, `GSK_RENDERER`, `GTK_DEBUG`), optional `WAYLAND_DISPLAY`; captures stdout/stderr. Caller-supplied `GTK_MCP*` rejected. Presets are inherited by the app's own children; `no-portals` also disables portal OpenURI |
+| `launch_app` | M | Broker-launched argv (no shell) with GTK presets (`GDK_DEBUG=no-portals`, `GOBJECT_DEBUG=instance-count`, `GTK_A11Y`, `LANGUAGE`, `GSK_RENDERER`, `GTK_DEBUG`), optional `WAYLAND_DISPLAY`; captures stdout/stderr. Caller env passes through; the broker sets `GTK_MCP_DIR` to its socket directory. Presets are inherited by the app's own children; `no-portals` also disables portal OpenURI |
 | `restart_app` | M | Broker-launched sessions only; new session, old refs invalid |
 | `stop_app` | M | Broker-launched sessions only; SIGTERM, then SIGKILL after timeout |
 | `snapshot` | R | Widget tree, `full` or `semantic`, `text` or `json` (`widget-tree.md`); returns `snapshot_id` |

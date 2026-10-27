@@ -15,9 +15,6 @@ struct Cli {
     /// Comma-separated exact tool names to hide.
     #[arg(long, value_delimiter = ',', default_value = "")]
     exclude_tools: Vec<String>,
-    /// Allow mutating tools (the app must also run with GTK_MCP_MUTATIONS=1).
-    #[arg(long)]
-    allow_mutations: bool,
     /// Allow launching and stopping apps.
     #[arg(long)]
     allow_launch: bool,
@@ -46,7 +43,6 @@ async fn main() -> anyhow::Result<()> {
         toolsets: names(cli.toolsets),
         tools: cli.tools.map(names),
         exclude_tools: names(cli.exclude_tools),
-        allow_mutations: cli.allow_mutations,
         allow_launch: cli.allow_launch,
         allow_atspi: cli.allow_atspi,
     };

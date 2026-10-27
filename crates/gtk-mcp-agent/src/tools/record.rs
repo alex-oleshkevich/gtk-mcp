@@ -564,6 +564,6 @@ pub fn stop_recording(_agent: &Rc<Agent>, _p: StopRecordingParams, ctx: &Ctx) ->
         "ignored_agent_emissions": rec.ignored.get(),
         "dropped_events": rec.dropped.get(),
         "duration_ms": rec.started.elapsed().as_millis() as u64,
-        "note": "replace {{secret:N}} placeholders before replaying; steps that mutate need --allow-mutations and GTK_MCP_MUTATIONS=1",
+        "note": "replace {{secret:N}} placeholders before replaying",
     }))
 }

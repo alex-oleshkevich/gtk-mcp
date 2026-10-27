@@ -16,7 +16,7 @@ process**.
 
 `gtk-mcp` never injects input and never captures the desktop. When both
 servers are configured, they cooperate only through the app process:
-`wayland-mcp app_launch` with `GTK_MCP=1` produces a session `gtk-mcp`
+`wayland-mcp app_launch` of an app with the agent compiled in produces a session `gtk-mcp`
 discovers on its own.
 
 ## 2. Current state
@@ -179,20 +179,19 @@ serializer.
 
 | Gate | Default | Set by |
 |---|---|---|
-| Agent active | off | `GTK_MCP=1` in the app environment |
-| Mutations | off | **both** broker `--allow-mutations` and app `GTK_MCP_MUTATIONS=1`; agent reports its setting in the handshake |
+| Agent active | off (compile time) | the developer's `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or feature alone) mark at the `attach` call site; calling `attach` activates unconditionally |
+| Mutations | n/a | no gate: mutating tools run when their toolset is enabled; the handshake reports versions and capabilities only |
 | Lifecycle (`launch_app`, `restart_app`, `stop_app`) | off | broker `--allow-launch` |
 | AT-SPI source | off | broker `--allow-atspi` |
 | Toolsets | `core` | broker `--toolsets core,actions,...`; `--tools` / `--exclude-tools` refine |
 
-- `launch_app` rejects caller-supplied `GTK_MCP*` variables; it sets
-  `GTK_MCP_MUTATIONS` only from broker policy.
-- After reading them, `attach` removes `GTK_MCP*` from its process
-  environment so apps the instrumented process launches are not
-  instrumented. GTK presets (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are
+- `launch_app` passes caller-supplied env through like any other variable;
+  it sets only `GTK_MCP_DIR` (its socket directory).
+- `attach` reads only `GTK_MCP_DIR` and removes nothing from its process
+  environment. GTK presets (`GDK_DEBUG`, `GSK_RENDERER`, `LANGUAGE`, …) are
   intentionally inherited by children; documented.
-- `batch` is advertised as non-read-only; at validation it is classified from
-  its steps, so read-only batches run with mutations off.
+- `batch` is advertised as non-read-only; its steps are validated before
+  anything executes.
 
 ## 5. Flows
 
@@ -203,13 +202,13 @@ sequenceDiagram
   participant App as App main thread
   participant Sock as Agent socket thread
   participant B as Broker
-  App->>App: attach(app): read env, scrub GTK_MCP*, start executor
+  App->>App: attach(app): resolve socket dir (GTK_MCP_DIR), start executor
   App->>Sock: on startup: bind $XDG_RUNTIME_DIR/gtk-mcp/<pid>.sock (0700/0600)
   B->>B: scan dir; unlink sockets whose pid is gone
   B->>Sock: connect; SO_PEERCRED check: our effective uid, pid = the socket's name
   B->>Sock: hello {protocol, broker_version}
   Sock->>App: enqueue
-  App-->>Sock: hello_ack {protocol, versions, capabilities, mutations_enabled}
+  App-->>Sock: hello_ack {protocol, versions, capabilities}
   Sock-->>B: hello_ack
   B->>B: protocol mismatch → session state incompatible (version_mismatch)
 ```
@@ -315,7 +314,6 @@ pub struct HelloAck {
     pub gtk_version: [u32; 3],
     pub adw_version: Option<[u32; 3]>,
     pub capabilities: Vec<Capability>,
-    pub mutations_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -342,7 +340,7 @@ pub enum ErrorCode {
     TargetUnmapped,
     UnsupportedOperation,
     InvalidValue,
-    MutationsDisabled,
+    MutationsDisabled, // retained in the enum; no longer emitted (no mutation gate)
     LaunchDisabled,
     Redacted,
     Timeout,
@@ -492,11 +490,10 @@ this section.
 
 | Name | Where | Meaning |
 |---|---|---|
-| `GTK_MCP=1` | app env | activate the agent |
-| `GTK_MCP_MUTATIONS=1` | app env | agent accepts mutations (broker policy also required) |
-| `GTK_MCP_DIR` | app env and broker | socket directory override; default `$XDG_RUNTIME_DIR/gtk-mcp` |
+| `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or feature alone) | app source | the only activation gate: compiled-in `attach` activates unconditionally; removing `debug_assertions` enables it in release |
+| `GTK_MCP_DIR` | app env and broker | socket directory override (location only, not a gate); default `$XDG_RUNTIME_DIR/gtk-mcp` |
 | `--toolsets`, `--tools`, `--exclude-tools` | broker | tool exposure; unknown names fail startup |
-| `--allow-mutations`, `--allow-launch`, `--allow-atspi` | broker | policy gates |
+| `--allow-launch`, `--allow-atspi` | broker | policy gates |
 | `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | broker | bounded retention |
 
 Socket path: `<dir>/<pid>.sock` (short enough for `sun_path`); app ID and
@@ -532,7 +529,7 @@ All checks run against `gtk-mcp-fixture` unless stated.
 
 ```text
 AC-1  As an agent, I want to discover instrumented apps, so that I can target the right process.
-      GIVEN the fixture runs with GTK_MCP=1 WHEN list_apps THEN it appears Running with versions and capabilities.
+      GIVEN the fixture (agent compiled in, no env gate) WHEN list_apps THEN it appears Running with versions and capabilities.
       GIVEN a stale socket from a killed process WHEN list_apps THEN it is not listed and the socket is removed.
       Verify by: broker integration test discovery_*.
 
@@ -547,8 +544,8 @@ AC-3  As an agent, I want precise errors for bad targets, so that I never act on
       Verify by: fixture test targets_*.
 
 AC-4  As an agent, I want semantic interaction with readback, so that I know the resulting state.
-      GIVEN mutations enabled WHEN interact set_expanded=true THEN observed {"expanded":true}; repeating it also succeeds.
-      GIVEN mutations disabled in broker or agent WHEN interact THEN mutations_disabled and no change.
+      GIVEN the agent attached WHEN interact set_expanded=true THEN observed {"expanded":true}; repeating it also succeeds.
+      GIVEN no env vars and a default broker WHEN interact THEN it runs and the change is observed.
       Verify by: fixture test interact_*.
 
 AC-5  As an agent, I want settled widget captures, so that images reflect the state I just set.
@@ -574,7 +571,7 @@ AC-8  As an agent, I want a non-blocking agent, so that a stuck app cannot hang 
 AC-9  As an agent, I want batches, so that I can do multi-step flows in one call.
       GIVEN steps [interact, wait_for, capture using $1.ref] WHEN batch THEN per-step results and a settled capture.
       GIVEN an invalid third step WHEN batch THEN nothing executes.
-      GIVEN only read-only steps with mutations off WHEN batch THEN it runs.
+      GIVEN only read-only steps WHEN batch THEN it runs; mutating steps run too, with no flag.
       Verify by: fixture test batch_*.
 
 AC-10 As a developer, I want live CSS iteration, so that I can style without rebuilding.
@@ -585,7 +582,7 @@ AC-10 As a developer, I want live CSS iteration, so that I can style without reb
 AC-11 As an agent, I want app lifecycle under broker control, so that rebuild loops are one call.
       GIVEN --allow-launch WHEN launch_app THEN a session appears; WHEN the app panics THEN the session is Exited with signal, in-flight id, and last logs.
       GIVEN a process not launched by the broker WHEN restart_app or stop_app THEN refused.
-      GIVEN launch_app env containing GTK_MCP_MUTATIONS THEN invalid_params.
+      GIVEN launch_app env containing GTK_MCP* keys THEN they pass through like any env; the broker sets GTK_MCP_DIR itself.
       Verify by: broker integration test lifecycle_*.
 
 AC-12 As an agent, I want layout evidence, so that I can explain sizing bugs.
@@ -602,8 +599,8 @@ AC-14 As a developer, I want recordings turned into replayable scripts, so that 
       Verify by: fixture test record_* driven by wayland-mcp real input in a sandbox (live check).
 
 AC-15 As the glimpse developer, I want to inspect my shell, so that I can debug panels and lock screen.
-      GIVEN glimpse-panel built with feature gtk-mcp and GTK_MCP=1 WHEN list_windows THEN one window per output with layer-shell data, selectable by WindowSel::Monitor.
-      GIVEN glimpse-lock without GTK_MCP_MUTATIONS WHEN interact THEN mutations_disabled; WHEN snapshot THEN the password field is redacted.
+      GIVEN glimpse-panel built with feature gtk-mcp WHEN list_windows THEN one window per output with layer-shell data, selectable by WindowSel::Monitor.
+      GIVEN glimpse-lock with the agent compiled in WHEN snapshot THEN the password field is redacted.
       Verify by: live check on the niri host.
 ```
 
@@ -652,13 +649,13 @@ Spikes, each before its milestone:
 ## 12. Open questions (all closed)
 
 1. ~~Embedded or external?~~ Embedded agent + external broker.
-2. ~~Injection method?~~ Explicit `attach`, Cargo feature, runtime `GTK_MCP=1`.
+2. ~~Injection method?~~ Explicit `attach`, Cargo feature; compile-time mark only (corrected in §13).
 3. ~~Launch apps?~~ Yes, broker-launched only, behind `--allow-launch`.
 4. ~~File dialogs?~~ `GDK_DEBUG=no-portals` preset; portal dialogs unsupported.
 5. ~~GSettings / GApplication open?~~ In scope (app toolset).
 6. ~~Dispatch model?~~ Main-thread executor fed by a channel (4.2).
 7. ~~Collapsed expander content?~~ Detached-content adapters (`attached: false`).
-8. ~~Mutation gate?~~ Broker flag AND agent env; handshake reports the agent side.
+8. ~~Mutation gate?~~ None (corrected in §13): compile-time gate only; handshake carries no mutation flag.
 9. ~~Logs?~~ Broker stderr capture + opt-in `forward_log`.
 10. ~~Clipboard?~~ Struck; `wayland-mcp`.
 11. ~~Selector collisions across glimpse panels?~~ `WindowSel::Monitor` and `nth`.
@@ -703,6 +700,7 @@ Reviewer: `GtkMcpDocReview` (independent reviewer agent), 2026-10-26, over
 | M6 as built | `accessible_tree`/`inspect_accessible` are answered by the agent from the public `GtkAccessible` API (role, parent/children, bounds, platform state, plus the widget facts audit rules need; secret widgets carry none) and the broker joins AT-SPI onto the *full* toplevel tree, then extracts the requested subtree (`root`, `max_depth` apply after the join). `audit_accessibility` is broker-only (`agent: false`): rules run over the joined tree. GTK rules: `interactive_not_focusable`, `icon_button_no_label`, `small_target` (< 24 px), `window_untitled`; AT-SPI rules (skipped with a reason when `--allow-atspi` is off or the app is not on the a11y bus): `missing_name`, `image_without_text`, `interactive_not_exported`. `inspect_accessible` tags every field `{"value", "source": "gtk"\|"atspi"}`; unavailable AT-SPI fields are `{"available": false, "source": "atspi", "reason"}`; secret widgets' name/description/text/value are `{"redacted": true}`. `trace_focus_order` (mutating) walks `gtk_widget_child_focus(TabForward)` from no focus over the window or over a `root` subtree and reports `order`, `end` (`end` \| `loop` \| `trap` \| `stuck` \| `max_steps`), `unreachable` (focusable, mapped, sensitive widgets never reached; `null` when cut off by `max_steps`) and restores the previous focus. AT-SPI events: `Broker::watch_atspi`/`unwatch_atspi` forward focus, state, name and window events of one app into the session event ring as `{"kind":"atspi", "event":"object:state-changed:focused", "ref", "role", "name", ...}` (ref/role/name from the latest join, refreshed when an unknown object appears; secret widgets carry no name); the `watch` tool entry point belongs to M5. `Config.atspi_bus` (`BusConfig`) overrides the session/a11y bus address (default: `DBUS_SESSION_BUS_ADDRESS` then `org.a11y.Bus.GetAddress`, or `AT_SPI_BUS_ADDRESS`) |
 | M5/M6 watch integration | `watch {kind: "atspi", events?: [prefix, ...]}` is app-wide (omit `target`) and calls `Broker::watch_atspi`; it requires `--allow-atspi`. The session has one AT-SPI subscription, id `"atspi"`, replaced by another AT-SPI watch. Records include that subscription id and work with `read_events` filters; `unwatch` calls `Broker::unwatch_atspi`, including for an exited session. `a11y_focus_event_carries_the_joined_ref` exercises watch/read_events/unwatch through the broker tool entry point. |
 | Minors (full-view wording, accessible_id, socket path/bind time, class-action enabled, ellipsis scope, highlight class, focus walk side effects, diff ids, action refs, no-portals scope, instance count availability, example, glimpse-lock type, visibility scope, shortcut scopes) | applied across `tools.md`, `widget-tree.md`, `embedding.md`, and sections 4–7, 11 |
+| Spec correction: compile-time gate only | The runtime env/flag gates are removed: no app-env activation variable, no app-env mutation variable, no broker mutation flag, no mutation flag in the handshake, no env scrubbing, and `launch_app` no longer rejects or sets agent env variables (it sets only `GTK_MCP_DIR`, the socket location). The only gate is `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or the feature alone) at the `attach` call site; removing `debug_assertions` enables the agent in release. `MutationsDisabled` stays in the error enum for wire compatibility but is never emitted for a gate. Sections 4.5, 5.1, 7, 7.1, 9 (AC-1/4/9/11/15) and 12 updated accordingly |
 
 Self-consistency pass (this plan): every type named in prose appears in
 section 7; every enum variant in section 7 is used by a flow, tool, or AC.

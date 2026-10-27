@@ -16,13 +16,13 @@ fn by_id(id: &str) -> Value {
     json!({"automation_id": id})
 }
 
-fn broker(fx: &Fixture, allow_mutations: bool) -> Arc<Broker> {
-    let policy = Policy { allow_mutations, toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
+fn broker(fx: &Fixture) -> Arc<Broker> {
+    let policy = Policy { toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
     Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap()
 }
 
 fn rw(fx: &Fixture) -> Client {
-    Client { broker: broker(fx, true) }
+    Client { broker: broker(fx) }
 }
 
 async fn counter(c: &Client) -> String {
@@ -51,7 +51,7 @@ fn has_action(list: &Value, name: &str) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn ac7_win_save_is_listed_and_activation_runs_the_handler_once() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     let list = c.json("list_actions", json!({"scope": "window"})).await;
@@ -97,7 +97,7 @@ async fn ac7_win_save_is_listed_and_activation_runs_the_handler_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn ac7_change_action_state_returns_observed_state_including_rejection() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     let before = c.json("inspect_action", json!({"name": "win.limit"})).await;
@@ -169,8 +169,8 @@ async fn late_result(c: &Client, after: u64) -> Value {
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_that_outlive_the_deadline_are_reported_as_late_results() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let policy = Policy { allow_mutations: true, toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
+    let fx = Fixture::start(&display, &[]);
+    let policy = Policy { toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
     let mut cfg = Config::with_socket_dir(fx.dir.path());
     cfg.default_deadline_ms = 1000;
     let c = Client { broker: Broker::new(policy, cfg).unwrap() };
@@ -195,7 +195,7 @@ async fn actions_that_outlive_the_deadline_are_reported_as_late_results() {
 #[tokio::test(flavor = "multi_thread")]
 async fn registered_widget_group_is_listed_typed_and_activated() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let scope = by_id("m2-registered-panel");
 
@@ -253,7 +253,7 @@ async fn registered_widget_group_is_listed_typed_and_activated() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unregistered_group_reports_incomplete_and_still_activates_by_name() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let scope = by_id("m2-unregistered-panel");
 
@@ -288,7 +288,7 @@ async fn unregistered_group_reports_incomplete_and_still_activates_by_name() {
 #[tokio::test(flavor = "multi_thread")]
 async fn widget_class_actions_are_listed_with_unknown_enabled() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     // GtkEntry installs misc.menu_entry_icon_* class actions; GtkWindow default.activate / window.close.
     let list = c.json("list_actions", json!({"scope": by_id("m2-shortcut-entry")})).await;
@@ -306,7 +306,7 @@ async fn widget_class_actions_are_listed_with_unknown_enabled() {
 #[tokio::test(flavor = "multi_thread")]
 async fn secret_scope_states_are_redacted() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let scope = by_id("m2-secret-entry");
     let mut outputs = Vec::new();
@@ -327,7 +327,7 @@ async fn secret_scope_states_are_redacted() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_menu_walks_sections_submenus_targets_and_attributes() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c.json("inspect_menu", json!({"target": by_id("m2-menu-button")})).await;
     assert_eq!(r["truncated"], false);
@@ -393,7 +393,7 @@ async fn inspect_menu_walks_sections_submenus_targets_and_attributes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_action_binding_reports_name_target_and_resolution() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c.json("inspect_action_binding", json!({"target": by_id("m2-theme-button")})).await;
     assert_eq!(r["actionable"], true);
@@ -423,7 +423,7 @@ async fn inspect_action_binding_reports_name_target_and_resolution() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_shortcuts_lists_controllers_triggers_actions_and_app_accels() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c.json("inspect_shortcuts", json!({})).await;
     let ctrls = r["controllers"].as_array().unwrap();
@@ -457,7 +457,7 @@ async fn inspect_shortcuts_lists_controllers_triggers_actions_and_app_accels() {
 #[tokio::test(flavor = "multi_thread")]
 async fn activate_shortcut_matches_runs_actions_and_reports_not_found() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     // <Control>s -> win.save (managed controller on the window)
@@ -511,7 +511,7 @@ async fn activate_shortcut_matches_runs_actions_and_reports_not_found() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_controllers_lists_gestures_with_phase_and_configuration() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     let r = c.json("inspect_controllers", json!({"target": by_id("m2-clickable")})).await;
@@ -542,46 +542,30 @@ async fn inspect_controllers_lists_gestures_with_phase_and_configuration() {
 // ---- gates -----------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mutating_action_tools_are_gated_in_broker_and_agent() {
+async fn mutating_action_tools_run_without_any_flag() {
     let display = require_display!();
-    let calls: Vec<(&str, Value)> = vec![
-        ("activate_action", json!({"name": "win.save"})),
-        ("change_action_state", json!({"name": "win.limit", "value": 3})),
-        ("activate_shortcut", json!({"trigger": "<Control>s"})),
-    ];
-    // broker refuses
-    let fx = Fixture::start(&display, true, &[]);
-    let ro = Client { broker: broker(&fx, false) };
-    for (t, a) in &calls {
-        let e = ro.err(t, a.clone()).await;
-        assert_eq!(e.code, ErrorCode::MutationsDisabled, "{t} (broker)");
-    }
-    // agent refuses (GTK_MCP_MUTATIONS unset in the app)
-    let fx2 = Fixture::start(&display, false, &[]);
-    let c2 = Client { broker: broker(&fx2, true) };
-    for (t, a) in &calls {
-        let e = c2.err(t, a.clone()).await;
-        assert_eq!(e.code, ErrorCode::MutationsDisabled, "{t} (agent)");
-    }
-    // read-only tools keep working without mutations, and nothing ran
-    let list = c2.json("list_actions", json!({"scope": "window"})).await;
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: broker(&fx) };
+    // Mutating action tools run with a default broker and no env gate.
+    c.json("activate_action", json!({"name": "win.save"})).await;
+    assert_eq!(counter(&c).await, "clicks: 1");
+    c.json("change_action_state", json!({"name": "win.limit", "value": 3})).await;
+    assert_eq!(c.json("inspect_action", json!({"name": "win.limit"})).await["state"], 3);
+    c.json("activate_shortcut", json!({"trigger": "<Control>s"})).await;
+    // Read-only tools keep working, and a batch may mix both kinds.
+    let list = c.json("list_actions", json!({"scope": "window"})).await;
     assert!(has_action(&list, "win.save"));
-    assert_eq!(c2.json("inspect_action", json!({"name": "win.limit"})).await["state"], 0);
-    assert_eq!(counter(&c2).await, "clicks: 0");
-    c2.json("inspect_shortcuts", json!({})).await;
-    c2.json("inspect_controllers", json!({"target": by_id("m2-clickable")})).await;
-    c2.json("inspect_menu", json!({"target": by_id("m2-menu-button")})).await;
-    // a batch is mutating exactly when a step is
-    let r = c2.json("batch", json!({"steps": [{"tool": "list_actions", "arguments": {"scope": "window"}}]})).await;
-    assert_eq!(r["steps"][0]["ok"], true, "{r}");
-    let e = c2.err("batch", json!({"steps": [{"tool": "activate_action", "arguments": {"name": "win.save"}}]})).await;
-    assert_eq!(e.code, ErrorCode::MutationsDisabled);
+    c.json("inspect_shortcuts", json!({})).await;
+    c.json("inspect_controllers", json!({"target": by_id("m2-clickable")})).await;
+    c.json("inspect_menu", json!({"target": by_id("m2-menu-button")})).await;
+    let r = c.json("batch", json!({"steps": [{"tool": "list_actions", "arguments": {"scope": "window"}}, {"tool": "activate_action", "arguments": {"name": "win.save"}}]})).await;
+    assert!(r["steps"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{r}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_run_inside_batch() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c
         .json(
@@ -601,9 +585,9 @@ async fn actions_run_inside_batch() {
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_toolset_is_absent_under_the_default_core_toolset() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let names = ["list_actions", "inspect_action", "activate_action", "change_action_state", "inspect_action_binding", "inspect_menu", "inspect_shortcuts", "activate_shortcut", "inspect_controllers"];
-    let core = Broker::new(Policy { allow_mutations: true, ..Policy::default() }, Config::with_socket_dir(fx.dir.path())).unwrap();
+    let core = Broker::new(Policy::default(), Config::with_socket_dir(fx.dir.path())).unwrap();
     for n in names {
         assert!(!core.is_enabled(n), "{n} must not be exposed by --toolsets core");
     }
@@ -612,7 +596,7 @@ async fn actions_toolset_is_absent_under_the_default_core_toolset() {
     assert_eq!(e.code, ErrorCode::InvalidParams);
     assert!(e.message.contains("unknown tool"), "{}", e.message);
 
-    let both = broker(&fx, true);
+    let both = broker(&fx);
     for n in names {
         assert!(both.is_enabled(n), "{n}");
     }

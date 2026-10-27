@@ -22,17 +22,12 @@ fn by_id(id: &str) -> Value {
     json!({"automation_id": id})
 }
 
-fn policy(allow_mutations: bool) -> Policy {
-    Policy {
-        toolsets: vec!["core".into(), "diagnostics".into()],
-        allow_mutations,
-        allow_launch: true,
-        ..Policy::default()
-    }
+fn policy() -> Policy {
+    Policy { toolsets: vec!["core".into(), "diagnostics".into()], allow_launch: true, ..Policy::default() }
 }
 
-fn client(fx: &Fixture, allow_mutations: bool) -> (Client, Arc<Broker>) {
-    let b = Broker::new(policy(allow_mutations), Config::with_socket_dir(fx.dir.path())).unwrap();
+fn client(fx: &Fixture) -> (Client, Arc<Broker>) {
+    let b = Broker::new(policy(), Config::with_socket_dir(fx.dir.path())).unwrap();
     (Client { broker: b.clone() }, b)
 }
 
@@ -69,8 +64,8 @@ async fn text_of(c: &Client, id: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_toggling_the_switch_produces_a_notify_event() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     let w = c.json("watch", json!({"target": by_id("feature-switch"), "kind": "notify", "properties": ["active"]})).await;
     let sub = w["subscription"].as_str().unwrap().to_owned();
     assert_eq!(w["kind"], "notify");
@@ -95,8 +90,8 @@ async fn watch_toggling_the_switch_produces_a_notify_event() {
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_notify_on_a_secret_entry_carries_names_only() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     let w = c.json("watch", json!({"target": by_id("password"), "kind": "notify", "properties": ["text"]})).await;
     assert_eq!(w["secret"], true);
     // all properties of the secret entry as well
@@ -116,8 +111,8 @@ async fn watch_notify_on_a_secret_entry_carries_names_only() {
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_signal_hooks_clicked_and_refuses_notify_and_unknown_signals() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     let w = c.json("watch", json!({"target": by_id("save-primary"), "kind": "signal", "signal": "clicked"})).await;
     assert_eq!(w["signal"], "clicked");
     // an emission on another button is not reported
@@ -138,8 +133,8 @@ async fn watch_signal_hooks_clicked_and_refuses_notify_and_unknown_signals() {
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_model_reports_items_and_selection_changes() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     c.settle_tree().await;
     let w = c.json("watch", json!({"target": by_id("watch-list"), "kind": "model"})).await;
     assert_eq!(w["selection_changed"], true);
@@ -174,7 +169,7 @@ fn launch_json(d: &Display) -> Value {
 async fn logs_a_gtk_critical_in_the_launched_fixture_appears_in_read_logs() {
     let display = require_display!();
     let dir = tempfile::tempdir().unwrap();
-    let b = Broker::new(policy(true), Config::with_socket_dir(dir.path())).unwrap();
+    let b = Broker::new(policy(), Config::with_socket_dir(dir.path())).unwrap();
     let c = Client { broker: b.clone() };
     let r = c.json("launch_app", launch_json(&display)).await;
     assert_eq!(r["state"], "running", "{r}");
@@ -202,14 +197,14 @@ async fn logs_a_gtk_critical_in_the_launched_fixture_appears_in_read_logs() {
 #[tokio::test(flavor = "multi_thread")]
 async fn logs_external_app_without_forwarding_is_unavailable_and_with_forwarding_works() {
     let display = require_display!();
-    let plain = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&plain, true);
+    let plain = Fixture::start(&display, &[]);
+    let (c, _b) = client(&plain);
     let e = c.err("read_logs", json!({})).await;
     assert_eq!(e.code, ErrorCode::Unavailable, "{e}");
     drop(plain);
 
-    let fwd = Fixture::start(&display, true, &[("FIXTURE_LOG_WRITER", "1")]);
-    let (c, _b) = client(&fwd, true);
+    let fwd = Fixture::start(&display, &[("FIXTURE_LOG_WRITER", "1")]);
+    let (c, _b) = client(&fwd);
     c.json("interact", json!({"target": by_id("log-critical"), "operation": "activate"})).await;
     let rec = until("forwarded critical record", Duration::from_secs(10), async || {
         let r = c.call("read_logs", json!({"source": "forwarded"})).await.ok()?.json_content().ok()?;
@@ -229,8 +224,8 @@ async fn logs_external_app_without_forwarding_is_unavailable_and_with_forwarding
 #[tokio::test(flavor = "multi_thread")]
 async fn measure_frames_of_an_animating_widget_has_timings() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     c.json("interact", json!({"target": by_id("animate-toggle"), "operation": "set_active", "active": true})).await;
     let r = c.json("measure_frames", json!({"duration_ms": 1500})).await;
     assert_eq!(r["idle"], false, "{r}");
@@ -256,8 +251,8 @@ async fn measure_frames_of_an_animating_widget_has_timings() {
 #[tokio::test(flavor = "multi_thread")]
 async fn record_ignores_agent_actions_and_lists_app_emissions_with_secret_placeholders() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     let r = c.json("record", json!({})).await;
     assert_eq!(r["recording"], true);
     assert!(r["controllers"].as_u64().unwrap() >= 1);
@@ -365,8 +360,8 @@ async fn record_real_input_becomes_a_batch_that_replays_in_a_new_session() {
         eprintln!("record_real_input_*: SKIPPED, wayland-mcp binary not found (set GTK_MCP_TEST_WAYLAND_MCP)");
         return;
     };
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     c.settle_tree().await;
     let start = c.json("record", json!({})).await;
     assert_eq!(start["recording"], true);
@@ -397,8 +392,8 @@ async fn record_real_input_becomes_a_batch_that_replays_in_a_new_session() {
     drop(fx);
 
     // Replay in a new session reproduces the state.
-    let fx2 = Fixture::start(&display, true, &[]);
-    let (c2, _b2) = client(&fx2, true);
+    let fx2 = Fixture::start(&display, &[]);
+    let (c2, _b2) = client(&fx2);
     let r = c2.json("batch", json!({"steps": steps})).await;
     assert!(r["stopped_at"].is_null(), "{r}");
     assert_eq!(text_of(&c2, "name-entry").await, "alice");
@@ -411,8 +406,8 @@ async fn record_real_input_becomes_a_batch_that_replays_in_a_new_session() {
 #[tokio::test(flavor = "multi_thread")]
 async fn controller_of_an_entry_that_became_secret_is_secret() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let policy = Policy { toolsets: vec!["core".into(), "actions".into(), "diagnostics".into()], allow_mutations: true, ..Policy::default() };
+    let fx = Fixture::start(&display, &[]);
+    let policy = Policy { toolsets: vec!["core".into(), "actions".into(), "diagnostics".into()], ..Policy::default() };
     let c = Client { broker: Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap() };
     let q = c.json("query", json!({"selector": {"type_name": "GtkText", "ancestor": by_id("name-entry")}})).await;
     let text = q["matches"][0]["ref"].as_str().unwrap_or_else(|| panic!("{q}")).to_owned();
@@ -444,8 +439,8 @@ async fn record_real_pointer_click_and_secret_typing() {
         eprintln!("record_real_pointer_*: SKIPPED, wayland-mcp binary not found");
         return;
     };
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     c.settle_tree().await;
     c.json("record", json!({})).await;
 
@@ -489,8 +484,8 @@ async fn record_popover_menu_activation_is_attributed_to_the_human() {
         eprintln!("record_popover_*: SKIPPED, wayland-mcp binary not found");
         return;
     };
-    let fx = Fixture::start(&display, true, &[]);
-    let (c, _b) = client(&fx, true);
+    let fx = Fixture::start(&display, &[]);
+    let (c, _b) = client(&fx);
     c.settle_tree().await;
     c.json("record", json!({})).await;
     // The agent opens the popover (ignored); the user picks the first item with the keyboard.

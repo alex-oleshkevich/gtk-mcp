@@ -25,7 +25,6 @@ fn ack() -> HelloAck {
             Capability::LogForwarding,
             Capability::InstanceCount,
         ],
-        mutations_enabled: true,
     }
 }
 
@@ -48,7 +47,6 @@ fn handshake_types() {
     let j = rt(ack());
     for k in [
         "protocol", "agent_version", "pid", "app_id", "gtk_version", "adw_version", "capabilities",
-        "mutations_enabled",
     ] {
         assert!(j.get(k).is_some(), "HelloAck.{k}");
     }

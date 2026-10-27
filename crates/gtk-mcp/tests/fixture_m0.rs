@@ -12,8 +12,8 @@ const SECRET: &str = "hunter2-SECRET-0xC0FFEE";
 #[tokio::test(flavor = "multi_thread")]
 async fn discovery_real_fixture_is_listed_running() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     let apps = c.json("list_apps", json!({})).await;
     let apps = apps.as_array().unwrap();
     assert_eq!(apps.len(), 1, "{apps:?}");
@@ -24,22 +24,21 @@ async fn discovery_real_fixture_is_listed_running() {
     let hello = info.hello.unwrap();
     assert_eq!(hello.gtk_version[0], 4);
     assert_eq!(hello.adw_version.map(|v| v[0]), Some(1));
-    assert!(!hello.mutations_enabled);
     assert!(hello.capabilities.contains(&gtk_mcp_protocol::Capability::Adwaita));
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn discovery_killed_fixture_leaves_no_listing_and_socket_is_removed() {
     let display = require_display!();
-    let mut fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let mut fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     assert_eq!(c.json("list_apps", json!({})).await.as_array().unwrap().len(), 1);
     let sock = fx.socket();
     // SIGKILL: the socket file is left behind by the dead process.
     fx.child.kill().unwrap();
     fx.child.wait().unwrap();
     // A fresh broker (new process view) must not list it and must unlink the file.
-    let c2 = Client { broker: fx.broker(false) };
+    let c2 = Client { broker: fx.broker() };
     let apps = c2.json("list_apps", json!({})).await;
     assert!(apps.as_array().unwrap().is_empty(), "{apps}");
     assert!(!sock.exists(), "stale socket must be removed");
@@ -53,41 +52,32 @@ async fn discovery_killed_fixture_leaves_no_listing_and_socket_is_removed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn agent_inactive_without_gtk_mcp_env_and_env_is_scrubbed() {
+async fn attach_with_no_env_gate_still_serves_and_mutates() {
     let display = require_display!();
-    // GTK_MCP=0 -> no socket at all. Run it directly (Fixture::start waits for a socket).
-    let dir = tempfile::tempdir().unwrap();
-    let bin = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("gtk-mcp-fixture");
-    let _ = Fixture::start(&display, false, &[]); // ensures the binary is built
-    let mut child = std::process::Command::new(&bin)
-        .env("GTK_MCP", "0")
-        .env("GTK_MCP_DIR", dir.path())
-        .env("XDG_RUNTIME_DIR", &display.xdg_runtime_dir)
-        .env("WAYLAND_DISPLAY", &display.wayland_display)
-        .env("GDK_BACKEND", "wayland")
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "inactive agent must not bind");
-    let _ = child.kill();
-    let _ = child.wait();
-
-    // With GTK_MCP=1 the variables are removed from the live process environment
-    // (the fixture reports what `std::env` sees in a label).
-    let fx = Fixture::start(&display, true, &[]);
+    // The harness sets only GTK_MCP_DIR (socket location): no activation
+    // variable exists, yet the agent serves and mutating tools run.
+    let fx = Fixture::start(&display, &[]);
     let initial = std::fs::read(format!("/proc/{}/environ", fx.pid)).unwrap();
-    assert!(String::from_utf8_lossy(&initial).contains("GTK_MCP=1"), "set at launch");
-    let c = Client { broker: fx.broker(false) };
+    let initial = String::from_utf8_lossy(&initial).into_owned();
+    let gate_keys: Vec<&str> = initial.split('\0').filter_map(|e| e.split('=').next()).filter(|k| k.starts_with("GTK_MCP") && !k.starts_with("GTK_MCP_TEST")).collect();
+    assert_eq!(gate_keys, ["GTK_MCP_DIR"], "only the socket-location variable is set; no activation variable exists");
+    let c = Client { broker: fx.broker() };
+    let apps = c.json("list_apps", json!({})).await;
+    assert_eq!(apps.as_array().unwrap().len(), 1, "{apps}");
+    // Mutating interact works with a default broker (no flag anywhere).
+    let r = c.json("interact", json!({"target": {"automation_id": "save-primary"}, "operation": "activate"})).await;
+    assert!(r["observed"].is_object(), "{r}");
     let s = c.snapshot_json(json!({})).await;
-    assert_eq!(node_by_name(&s, "env-report")["text"], "gtk-mcp-env: none");
+    assert_eq!(node_by_name(&s, "click-counter")["text"], "clicks: 1");
+    // Nothing is scrubbed: GTK_MCP_DIR remains visible to the app.
+    assert_eq!(node_by_name(&s, "env-report")["text"], "gtk-mcp-env: GTK_MCP_DIR");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_refs_are_stable_and_text_matches_json() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     c.settle_tree().await;
     let a = c.snapshot_json(json!({})).await;
     let b = c.snapshot_json(json!({})).await;
@@ -127,8 +117,8 @@ async fn snapshot_refs_are_stable_and_text_matches_json() {
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_collapsed_expander_child_is_detached_via_adapter() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     let s = c.snapshot_json(json!({})).await;
     let exp = node_by_name(&s, "advanced-expander");
     assert_eq!(exp["type"], "GtkExpander");
@@ -147,8 +137,8 @@ async fn snapshot_collapsed_expander_child_is_detached_via_adapter() {
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_popover_in_place_list_realized_truncation() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     let s = c.snapshot_json(json!({})).await;
 
     // closed popover appears once, in place, native + collapsed with a child count
@@ -202,8 +192,8 @@ fn count_cut(v: &Value) -> usize {
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_budget_spans_roots_and_semantic_view_keeps_cut_nodes() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let c = Client { broker: fx.broker(true) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     c.json("interact", json!({"target": {"automation_id": "open-second-window"}, "operation": "activate"})).await;
     let all = c.snapshot_json(json!({})).await;
     let roots = all["roots"].as_array().unwrap().len();
@@ -227,8 +217,8 @@ async fn snapshot_budget_spans_roots_and_semantic_view_keeps_cut_nodes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_semantic_view_keeps_hierarchy_and_marks_elision() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     c.settle_tree().await;
     let full = c.snapshot_json(json!({})).await;
     let sem = c.snapshot_json(json!({"view": "semantic"})).await;
@@ -247,8 +237,8 @@ async fn snapshot_semantic_view_keeps_hierarchy_and_marks_elision() {
 #[tokio::test(flavor = "multi_thread")]
 async fn secrets_snapshot_query_inspect_never_contain_content() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
-    let c = Client { broker: fx.broker(true) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     // The password is placed through the agent's own mutating path in M1 tests
     // (secrets_*); here only the structure/redaction flags are asserted.
     let s = c.snapshot_json(json!({})).await;
@@ -279,8 +269,8 @@ async fn secrets_snapshot_query_inspect_never_contain_content() {
 #[tokio::test(flavor = "multi_thread")]
 async fn targets_query_inspect_and_ambiguity() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     // AC-3: two "Save" buttons -> ambiguous via text selector in a single-target tool
     let e = c.err("inspect", json!({"target": {"text": "Save", "type_name": "GtkButton"}})).await;
     assert_eq!(e.code, ErrorCode::AmbiguousTarget);
@@ -328,8 +318,8 @@ async fn targets_query_inspect_and_ambiguity() {
 #[tokio::test(flavor = "multi_thread")]
 async fn windows_list_window_and_layer_data_absent_without_layer_shell() {
     let display = require_display!();
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: fx.broker(false) };
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: fx.broker() };
     let w = c.json("list_windows", json!({})).await;
     let wins = w["windows"].as_array().unwrap();
     assert_eq!(wins.len(), 1);
@@ -350,12 +340,11 @@ async fn windows_list_window_and_layer_data_absent_without_layer_shell() {
 async fn attach_remote_application_instance_never_binds() {
     let display = require_display!();
     // Unique application id: the first instance owns the name and binds.
-    let first = Fixture::start(&display, false, &[("FIXTURE_UNIQUE", "1")]);
+    let first = Fixture::start(&display, &[("FIXTURE_UNIQUE", "1")]);
     // Second instance: same app id, shared session bus name -> remote instance, no `startup`.
     let dir2 = tempfile::tempdir().unwrap();
     let bin = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("gtk-mcp-fixture");
     let mut second = std::process::Command::new(&bin)
-        .env("GTK_MCP", "1")
         .env("GTK_MCP_DIR", dir2.path())
         .env("FIXTURE_UNIQUE", "1")
         .env("XDG_RUNTIME_DIR", &display.xdg_runtime_dir)

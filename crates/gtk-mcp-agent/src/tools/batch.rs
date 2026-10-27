@@ -95,9 +95,9 @@ fn step_budget(tool: &str, args: &Value) -> Duration {
     Duration::from_millis(ms)
 }
 
-/// Validation shared by the pre-dispatch pass: tool names, params, policy,
+/// Validation shared by the pre-dispatch pass: tool names, params,
 /// limits, nesting, placeholders. Nothing has executed when this fails.
-pub fn validate(agent: &Agent, p: &BatchParams) -> Result<(), AgentError> {
+pub fn validate(p: &BatchParams) -> Result<(), AgentError> {
     if p.steps.is_empty() {
         return Err(AgentError::invalid_params("batch needs at least one step"));
     }
@@ -106,15 +106,8 @@ pub fn validate(agent: &Agent, p: &BatchParams) -> Result<(), AgentError> {
     }
     for (i, s) in p.steps.iter().enumerate() {
         let n = i + 1;
-        let spec = validate_step(&s.tool, &s.arguments)
+        validate_step(&s.tool, &s.arguments)
             .map_err(|e| AgentError::invalid_params(format!("step {n}: {e}")).with_data(json!({"step": n})))?;
-        if spec.mutating && !agent.config.mutations {
-            return Err(AgentError::new(
-                ErrorCode::MutationsDisabled,
-                format!("step {n} ({}) is mutating and the app was started without GTK_MCP_MUTATIONS=1", s.tool),
-            )
-            .with_data(json!({"step": n})));
-        }
         let mut bad = None;
         visit_placeholders(&s.arguments, &mut |k| {
             if k == 0 || k >= n {
@@ -133,7 +126,7 @@ pub fn validate(agent: &Agent, p: &BatchParams) -> Result<(), AgentError> {
 }
 
 pub async fn batch(agent: &Rc<Agent>, p: BatchParams, ctx: &Ctx) -> Result<Value, AgentError> {
-    validate(agent, &p)?;
+    validate(&p)?;
     let stop_on_error = p.stop_on_error.unwrap_or(true);
     let mut results: Vec<BatchStepResult> = Vec::with_capacity(p.steps.len());
     let mut refs: Vec<Option<String>> = Vec::with_capacity(p.steps.len());

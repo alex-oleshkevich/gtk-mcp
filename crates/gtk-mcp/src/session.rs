@@ -235,9 +235,6 @@ impl Session {
     pub fn hello(&self) -> Option<&HelloAck> {
         self.hello.as_ref()
     }
-    pub fn mutations_enabled(&self) -> bool {
-        self.hello.as_ref().is_some_and(|h| h.mutations_enabled)
-    }
     pub fn state(&self) -> SessionState {
         let st = lock(&self.inner).state.clone();
         // The socket can close a moment before the child is reaped: fill in the

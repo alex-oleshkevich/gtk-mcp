@@ -36,7 +36,6 @@ pub struct HelloAck {
     pub gtk_version: [u32; 3],
     pub adw_version: Option<[u32; 3]>,
     pub capabilities: Vec<Capability>,
-    pub mutations_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

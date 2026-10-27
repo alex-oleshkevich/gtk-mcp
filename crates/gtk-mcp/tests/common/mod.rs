@@ -70,7 +70,6 @@ pub fn default_ack(pid: u32) -> HelloAck {
         gtk_version: [4, 22, 1],
         adw_version: Some([1, 9, 0]),
         capabilities: vec![Capability::Adwaita, Capability::AccessibleId],
-        mutations_enabled: false,
     }
 }
 
@@ -82,9 +81,6 @@ impl<'a> MockBuilder<'a> {
             a
         });
         self
-    }
-    pub fn mutations(self, on: bool) -> Self {
-        self.ack(move |a| a.mutations_enabled = on)
     }
     pub fn script(mut self, method: &str, steps: Vec<Step>) -> Self {
         self.scripts.insert(method.into(), steps);
@@ -278,10 +274,6 @@ pub fn broker_with(dir: &Path, policy: Policy, tweak: impl FnOnce(&mut Config)) 
     let mut cfg = Config::with_socket_dir(dir);
     tweak(&mut cfg);
     Broker::new(policy, cfg).unwrap()
-}
-
-pub fn allow_all() -> Policy {
-    Policy { allow_mutations: true, ..Policy::default() }
 }
 
 /// Poll `f` until it returns true (max ~3 s).

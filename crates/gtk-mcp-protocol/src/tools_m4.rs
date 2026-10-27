@@ -80,8 +80,8 @@ pub struct LaunchAppParams {
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Extra environment. Keys starting with `GTK_MCP` are rejected: the broker
-    /// sets `GTK_MCP`, `GTK_MCP_DIR` and `GTK_MCP_MUTATIONS` itself.
+    /// Extra environment, passed through like any other variable. The broker
+    /// itself sets `GTK_MCP_DIR` to its socket directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

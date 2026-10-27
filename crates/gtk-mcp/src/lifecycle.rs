@@ -63,8 +63,7 @@ impl Broker {
 
     /// Spawn `spec`, then wait (bounded) for the session that appears in its process group.
     async fn start(self: &Arc<Self>, spec: LaunchSpec, timeout: Duration) -> Result<Arc<Session>, AgentError> {
-        let inherited: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).filter(|k| k.starts_with("GTK_MCP")).collect();
-        let plan = spec.env_plan(&self.config.socket_dir, self.policy.allow_mutations, &inherited);
+        let plan = spec.env_plan(&self.config.socket_dir);
         let launch = Launch::spawn(spec, &plan, self.config.ring_capacity)?;
         lock(&self.launches).push(launch.clone());
         let deadline = Instant::now() + timeout;
@@ -79,7 +78,7 @@ impl Broker {
                 let _ = tokio::task::spawn_blocking(move || l.wait_exit(Duration::from_secs(1))).await;
                 return Err(launch::exited_error(
                     &launch,
-                    "the app exited before its agent attached; it must embed gtk-mcp-agent and call attach (GTK_MCP=1 is set)",
+                    "the app exited before its agent attached; it must embed gtk-mcp-agent and call attach",
                 ));
             }
             if Instant::now() >= deadline {

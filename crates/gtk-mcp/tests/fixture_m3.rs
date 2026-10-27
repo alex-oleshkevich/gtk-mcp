@@ -20,17 +20,13 @@ fn by_id(id: &str) -> Value {
     json!({"automation_id": id})
 }
 
-fn broker(fx: &Fixture, allow_mutations: bool) -> Arc<Broker> {
-    let policy = Policy {
-        toolsets: vec!["core".into(), "layout-style".into()],
-        allow_mutations,
-        ..Policy::default()
-    };
+fn broker(fx: &Fixture) -> Arc<Broker> {
+    let policy = Policy { toolsets: vec!["core".into(), "layout-style".into()], ..Policy::default() };
     Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap()
 }
 
 fn rw(fx: &Fixture) -> Client {
-    Client { broker: broker(fx, true) }
+    Client { broker: broker(fx) }
 }
 
 fn decode_png(b: &[u8]) -> image::RgbaImage {
@@ -122,7 +118,7 @@ fn has_finding_for(v: &Value, check: &str, r: &str) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn layout_audit_finds_ellipsized_label_and_for_size_measures() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     let long = ref_of(&c, "long-label").await;
@@ -199,7 +195,7 @@ async fn layout_audit_finds_ellipsized_label_and_for_size_measures() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_layout_for_size_is_consistent_with_the_allocation() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     // the wrapping label's height depends on the width: narrower is taller
@@ -234,7 +230,7 @@ async fn inspect_layout_for_size_is_consistent_with_the_allocation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inspect_style_reports_public_style_information() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let s = c.json("inspect_style", json!({"target": by_id("save-primary")})).await;
     assert_eq!(s["css_name"], "button");
@@ -259,7 +255,7 @@ async fn inspect_style_reports_public_style_information() {
 #[tokio::test(flavor = "multi_thread")]
 async fn css_invalid_reports_diagnostics_and_installs_nothing() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     let r = c.json("apply_css", json!({"css": "\n\n.m3-accent { colour: red; }\n"})).await;
     assert_eq!(r["installed"], false, "{r}");
@@ -289,7 +285,7 @@ async fn css_invalid_reports_diagnostics_and_installs_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn css_apply_changes_pixels_remove_and_disconnect_revert() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     scroll_section(&c).await;
     let original = shot(&c, "m3-styled").await;
@@ -340,7 +336,7 @@ async fn css_apply_changes_pixels_remove_and_disconnect_revert() {
 #[tokio::test(flavor = "multi_thread")]
 async fn highlight_outlines_hides_its_class_and_reverts() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     scroll_section(&c).await;
     let original = shot(&c, "m3-styled").await;
@@ -397,7 +393,7 @@ async fn highlight_outlines_hides_its_class_and_reverts() {
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_highlight_keeps_another_clients_highlight() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
     scroll_section(&c).await;
     let magenta = |p: &image::Rgba<u8>| near(p, (0xff, 0x2b, 0xd6), 12);
@@ -454,7 +450,7 @@ fn all_nodes<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn render_tree_is_limited_and_keeps_secrets_out() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     // plain widget: nodes, text with glyph count
@@ -534,7 +530,7 @@ async fn render_tree_is_limited_and_keeps_secrets_out() {
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_are_inspected_and_overrides_revert_on_disconnect() {
     let display = require_display!();
-    let fx = Fixture::start(&display, true, &[]);
+    let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
 
     let s = c.json("inspect_settings", json!({})).await;
@@ -615,64 +611,41 @@ async fn settings_are_inspected_and_overrides_revert_on_disconnect() {
 // ---- mutation gate and toolset exposure ---------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mutating_layout_style_tools_are_gated_and_read_only_ones_are_not() {
+async fn mutating_layout_style_tools_run_without_any_flag() {
     let display = require_display!();
-    // agent side off, broker on
-    let fx = Fixture::start(&display, false, &[]);
-    let c = Client { broker: broker(&fx, true) };
-    for (tool, args) in [
-        ("apply_css", json!({"css": ".a { color: red; }"})),
-        ("remove_css", json!({"handle": "css-1"})),
-        ("highlight", json!({"target": by_id("m3-styled")})),
-        ("override_setting", json!({"setting": "animations", "value": false})),
-    ] {
-        let e = c.err(tool, args).await;
-        assert_eq!(e.code, ErrorCode::MutationsDisabled, "{tool} (agent gate)");
-    }
-    // broker side off, agent on
-    let fx2 = Fixture::start(&display, true, &[]);
-    let c2 = Client { broker: broker(&fx2, false) };
-    for (tool, args) in [
-        ("apply_css", json!({"css": ".a { color: red; }"})),
-        ("highlight", json!({"target": by_id("m3-styled")})),
-        ("override_setting", json!({"setting": "animations", "value": false})),
-    ] {
-        let e = c2.err(tool, args).await;
-        assert_eq!(e.code, ErrorCode::MutationsDisabled, "{tool} (broker gate)");
-    }
-    // read-only tools run without mutations on either side
-    for cl in [&c, &c2] {
-        cl.json("inspect_layout", json!({"target": by_id("m3-styled")})).await;
-        cl.json("audit_layout", json!({})).await;
-        cl.json("inspect_style", json!({"target": by_id("m3-styled")})).await;
-        cl.json("inspect_render", json!({"target": by_id("click-counter")})).await;
-        cl.json("inspect_settings", json!({})).await;
-    }
-    // nothing changed
-    assert_eq!(c2.json("inspect_style", json!({"target": by_id("m3-styled")})).await["temporary_css_providers"], 0);
+    let fx = Fixture::start(&display, &[]);
+    let c = Client { broker: broker(&fx) };
+    // Mutating tools run with a default broker and no env gate.
+    let css = c.json("apply_css", json!({"css": ".m3-accent { background-color: #e01b24; }"})).await;
+    let handle = css["handle"].as_str().unwrap().to_owned();
+    c.json("highlight", json!({"target": by_id("m3-styled")})).await;
+    c.json("override_setting", json!({"setting": "animations", "value": false})).await;
+    c.json("remove_css", json!({"handle": handle})).await;
+    // Read-only tools run too.
+    c.json("inspect_layout", json!({"target": by_id("m3-styled")})).await;
+    c.json("audit_layout", json!({})).await;
+    c.json("inspect_style", json!({"target": by_id("m3-styled")})).await;
+    c.json("inspect_render", json!({"target": by_id("click-counter")})).await;
+    c.json("inspect_settings", json!({})).await;
+    // Clearing the highlight removes its provider too; nothing temporary remains.
+    c.json("highlight", json!({})).await;
+    assert_eq!(c.json("inspect_style", json!({"target": by_id("m3-styled")})).await["temporary_css_providers"], 0);
 
-    // the layout-style tools only exist when the toolset is enabled
-    let core_only = Broker::new(Policy { allow_mutations: true, ..Policy::default() }, Config::with_socket_dir(fx2.dir.path())).unwrap();
+    // The layout-style tools only exist when the toolset is enabled.
+    let core_only = Broker::new(Policy::default(), Config::with_socket_dir(fx.dir.path())).unwrap();
     let c3 = Client { broker: core_only };
     let e = c3.err("inspect_layout", json!({"target": by_id("m3-styled")})).await;
     assert_eq!(e.code, ErrorCode::InvalidParams);
 
-    // batch: mutating steps follow the same gate, read-only steps run
-    let r = c2
+    // Batch: read-only and mutating steps both run.
+    let r = c
         .json("batch", json!({"steps": [
             {"tool": "inspect_layout", "arguments": {"target": by_id("m3-styled")}},
             {"tool": "audit_layout", "arguments": {"checks": ["zero_size"]}},
-        ]}))
-        .await;
-    assert_eq!(r["steps"].as_array().unwrap().len(), 2);
-    assert!(r["steps"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{r}");
-    let c1 = rw(&fx2);
-    let r = c1
-        .json("batch", json!({"steps": [
             {"tool": "apply_css", "arguments": {"css": ".m3-accent { background-color: #e01b24; }"}},
             {"tool": "inspect_style", "arguments": {"target": by_id("m3-styled")}},
         ]}))
         .await;
-    assert_eq!(r["steps"][0]["result"]["installed"], true, "{r}");
-    assert_eq!(r["steps"][1]["result"]["temporary_css_providers"], 1);
+    assert_eq!(r["steps"].as_array().unwrap().len(), 4);
+    assert!(r["steps"].as_array().unwrap().iter().all(|s| s["ok"] == true), "{r}");
 }

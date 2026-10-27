@@ -59,11 +59,6 @@ impl LaunchSpec {
         }
         let env = p.env.unwrap_or_default();
         for (k, v) in &env {
-            if k.to_ascii_uppercase().starts_with("GTK_MCP") {
-                return Err(bad(format!(
-                    "env '{k}' is not allowed: GTK_MCP* variables are set by the broker from its policy (--allow-mutations)"
-                )));
-            }
             if k.is_empty() || k.contains('=') {
                 return Err(bad(format!("env name '{k}' is invalid")));
             }
@@ -91,10 +86,10 @@ impl LaunchSpec {
         Ok(Self { argv: p.argv, cwd, env, presets, wayland_display: p.wayland_display, xdg_runtime_dir: p.xdg_runtime_dir })
     }
 
-    /// The environment the child gets on top of the broker's own: variables to
-    /// set and variables to remove. `GTK_MCP*` inherited from the broker is
-    /// removed; the broker's policy alone decides `GTK_MCP_MUTATIONS`.
-    pub fn env_plan(&self, socket_dir: &Path, allow_mutations: bool, inherited: &[String]) -> EnvPlan {
+    /// The environment the child gets on top of the broker's own. Caller env
+    /// passes through untouched; the broker only adds the GTK presets and
+    /// `GTK_MCP_DIR` (its socket directory).
+    pub fn env_plan(&self, socket_dir: &Path) -> EnvPlan {
         let mut set: BTreeMap<String, String> = self.env.clone();
         let mut merge = |name: &str, token: &str| {
             let cur = set.entry(name.to_owned()).or_default();
@@ -129,20 +124,14 @@ impl LaunchSpec {
         if let Some(v) = &self.xdg_runtime_dir {
             set.insert("XDG_RUNTIME_DIR".into(), v.clone());
         }
-        set.insert("GTK_MCP".into(), "1".into());
         set.insert("GTK_MCP_DIR".into(), socket_dir.to_string_lossy().into_owned());
-        if allow_mutations {
-            set.insert("GTK_MCP_MUTATIONS".into(), "1".into());
-        }
-        let remove = inherited.iter().filter(|k| k.starts_with("GTK_MCP") && !set.contains_key(*k)).cloned().collect();
-        EnvPlan { set, remove }
+        EnvPlan { set }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvPlan {
     pub set: BTreeMap<String, String>,
-    pub remove: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,15 +210,12 @@ fn pump(mut r: impl Read, source: &'static str, launch: Arc<Launch>) {
 }
 
 impl Launch {
-    /// Spawn `spec` in a new process group. The caller supplies the policy-derived environment.
+    /// Spawn `spec` in a new process group. The caller supplies the planned environment.
     pub fn spawn(spec: LaunchSpec, plan: &EnvPlan, ring_capacity: usize) -> Result<Arc<Launch>, AgentError> {
         let mut cmd = Command::new(&spec.argv[0]);
         cmd.args(&spec.argv[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
         if let Some(c) = &spec.cwd {
             cmd.current_dir(c);
-        }
-        for k in &plan.remove {
-            cmd.env_remove(k);
         }
         cmd.envs(&plan.set);
         let mut child = cmd.spawn().map_err(|e| {
@@ -446,19 +432,21 @@ mod tests {
     }
 
     #[test]
-    fn rejects_gtk_mcp_env_any_case() {
-        for k in ["GTK_MCP", "GTK_MCP_MUTATIONS", "GTK_MCP_DIR", "gtk_mcp_x"] {
-            let mut p = params(&["app"]);
-            p.env = Some([(k.to_owned(), "1".to_owned())].into());
-            let e = LaunchSpec::from_params(p).unwrap_err();
-            assert_eq!(e.code, ErrorCode::InvalidParams, "{k}");
-        }
+    fn caller_env_passes_through() {
+        // GTK_MCP* keys are ordinary env now: accepted and passed through.
+        let mut p = params(&["app"]);
+        p.env = Some([("GTK_MCP_DIR".to_owned(), "/elsewhere".to_owned()), ("gtk_mcp_x".to_owned(), "1".to_owned())].into());
+        let spec = LaunchSpec::from_params(p).unwrap();
+        assert_eq!(spec.env["gtk_mcp_x"], "1");
         assert!(LaunchSpec::from_params(params(&[])).is_err());
         assert!(LaunchSpec::from_params(params(&["a\0b"])).is_err());
+        let mut p = params(&["app"]);
+        p.env = Some([("".to_owned(), "1".to_owned())].into());
+        assert!(LaunchSpec::from_params(p).is_err());
     }
 
     #[test]
-    fn env_plan_presets_and_policy() {
+    fn env_plan_presets() {
         let mut p = params(&["app"]);
         p.env = Some([("GDK_DEBUG".to_owned(), "vulkan".to_owned()), ("FOO".to_owned(), "1".to_owned())].into());
         p.presets = Some(LaunchPresets {
@@ -471,7 +459,7 @@ mod tests {
         });
         p.wayland_display = Some("wayland-9".into());
         let spec = LaunchSpec::from_params(p).unwrap();
-        let plan = spec.env_plan(Path::new("/run/x"), false, &["GTK_MCP_MUTATIONS".into(), "HOME".into()]);
+        let plan = spec.env_plan(Path::new("/run/x"));
         assert_eq!(plan.set["GDK_DEBUG"], "vulkan,no-portals");
         assert_eq!(plan.set["GOBJECT_DEBUG"], "instance-count");
         assert_eq!(plan.set["GTK_A11Y"], "none");
@@ -479,13 +467,8 @@ mod tests {
         assert_eq!(plan.set["GSK_RENDERER"], "cairo");
         assert_eq!(plan.set["GTK_DEBUG"], "layout");
         assert_eq!(plan.set["WAYLAND_DISPLAY"], "wayland-9");
-        assert_eq!(plan.set["GTK_MCP"], "1");
         assert_eq!(plan.set["GTK_MCP_DIR"], "/run/x");
-        assert!(!plan.set.contains_key("GTK_MCP_MUTATIONS"));
-        assert_eq!(plan.remove, vec!["GTK_MCP_MUTATIONS".to_owned()]);
-        let plan = spec.env_plan(Path::new("/run/x"), true, &["GTK_MCP_MUTATIONS".into()]);
-        assert_eq!(plan.set["GTK_MCP_MUTATIONS"], "1");
-        assert!(plan.remove.is_empty());
+        assert_eq!(plan.set["FOO"], "1");
     }
 
     /// gm-3n1: once the reaped launch's group empties, the waiter latches it
@@ -494,7 +477,7 @@ mod tests {
     #[test]
     fn emptied_group_is_latched_and_never_signalled() {
         let spec = LaunchSpec::from_params(params(&["sh", "-c", "sleep 1.5 >/dev/null 2>&1 & exit 0"])).unwrap();
-        let plan = spec.env_plan(Path::new("/nonexistent"), false, &[]);
+        let plan = spec.env_plan(Path::new("/nonexistent"));
         let l = Launch::spawn(spec, &plan, 16).unwrap();
         assert_eq!(l.wait_exit(Duration::from_secs(5)).and_then(|e| e.code), Some(0));
         assert!(l.reaped());
