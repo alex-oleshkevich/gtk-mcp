@@ -1,16 +1,16 @@
-# Widget Tree Snapshot
+# Widget tree snapshot
 
 Status: final, aligned with `plan.md` (2026-10-26).
 
 ## Purpose
 
-The widget tree is the primary observation surface of `gtk-mcp`. It lets an
-agent discover what a GTK application currently contains, choose a target,
-and then call `inspect`, `interact`, `inspect_layout`, or `capture` with an
+The widget tree is the main thing an agent looks at in `gtk-mcp`. It shows
+what a GTK application currently contains, so the agent can pick a target and
+then call `inspect`, `interact`, `inspect_layout`, or `capture` with an
 unambiguous reference.
 
-It is a GTK widget tree, not an accessibility tree and not a Wayland surface
-tree:
+It is a GTK widget tree. It is neither an accessibility tree nor a Wayland
+surface tree:
 
 - Internal GTK containers and non-actionable widgets are present in the full
   view.
@@ -55,21 +55,21 @@ tree:
 
 ### Views
 
-**`full`** — every widget in the hierarchy reachable through
+The `full` view lists every widget in the hierarchy reachable through
 `gtk_widget_get_first_child` / `gtk_widget_get_next_sibling`, in child order,
 plus detached content from adapters, up to the requested limits.
 
-**`semantic`** — a compressed view for task-oriented work. It keeps
+The `semantic` view is a compressed view for task-oriented work. It keeps
 actionable, text-bearing, selectable, and state-bearing widgets, plus the
-ancestors needed to preserve hierarchy. Purely structural or decorative
-widgets may be elided. Elision is marked in JSON (`elided_children`) and in
-text (`… 3 structural widgets`). Semantic view never invents nodes and never
-changes parentage of the nodes it keeps: an elided node's kept descendants
-stay attached to their nearest kept ancestor, and the elision marker records
-that the path is compressed. A node cut by `max_depth` or `max_nodes` is
-always kept, so its `children_truncated` marker survives.
+ancestors needed to preserve hierarchy. It may elide purely structural or
+decorative widgets. Elision is marked in JSON (`elided_children`) and in
+text (`… 3 structural widgets`). The semantic view never invents nodes and
+never changes the parentage of the nodes it keeps: an elided node's kept
+descendants stay attached to their nearest kept ancestor, and the elision
+marker records that the path is compressed. A node cut by `max_depth` or
+`max_nodes` is always kept, so its `children_truncated` marker survives.
 
-The default remains `full`: this is a GTK development tool, and layout bugs
+The default stays `full`. This is a GTK development tool, and layout bugs
 usually live in the structural widgets a semantic view would hide.
 
 ### Detached content
@@ -82,9 +82,9 @@ public properties:
 |---|---|---|
 | `GtkExpander` | `child` property | Unparented while collapsed |
 
-Adapter nodes carry `attached: false` and `via: "GtkExpander:child"`. Their
-descendants are walked normally. New adapters are added only for verified
-GTK behavior.
+Adapter nodes carry `attached: false` and `via: "GtkExpander:child"`. The
+agent walks their descendants normally. New adapters are added only for
+verified GTK behavior.
 
 ## Canonical JSON form
 
@@ -145,15 +145,15 @@ Present when GTK exposes the information:
 | `secret` | `true` when the node is in the secret set (`plan.md` 4.4). |
 | `warnings` | Node-level problems, e.g. bounds unavailable, text unreadable. |
 
-Unknown or version-specific data is not guessed. Additional data goes under
-a namespaced key (`adw`, `a11y`) announced by handshake capabilities, not by
-changing core fields.
+The agent does not guess unknown or version-specific data. Extra data goes
+under a namespaced key (`adw`, `a11y`) that the handshake capabilities
+announce; core fields do not change to carry it.
 
 ### Text format
 
-Text is a lossless-in-structure, lossy-in-content rendering of the JSON:
-hierarchy, order, type, reference, key state, and truncated text survive;
-long strings and class lists may be shortened.
+The text format renders the JSON with its structure intact and some content
+dropped. Hierarchy, order, type, reference, key state, and truncated text
+survive; long strings and class lists may be shortened.
 
 ```text
 GtkWindow "Preferences" [w1] 480x640 mapped
@@ -198,20 +198,21 @@ Rules:
 
 ## Semantics and limits
 
-- **Point in time.** A snapshot is built on the GTK main thread and reflects
-  one moment. Call `snapshot` again, or use `watch`, to observe change.
-- **Existing children only.** In a virtualized `GtkListView`, only row widgets
-  that exist appear as children (`children_source: "realized"`); the item set
-  is available through `inspect_model`.
-- **Unmapped content is included by default.** Hidden stack pages, unmapped
+- A snapshot is a point in time. The agent builds it on the GTK main thread
+  and it reflects one moment. To observe change, call `snapshot` again or use
+  `watch`.
+- Only existing children appear. In a virtualized `GtkListView`, the children
+  are the row widgets that exist (`children_source: "realized"`); the item
+  set is available through `inspect_model`.
+- Unmapped content is included by default. Hidden stack pages, unmapped
   widgets, and detached content are listed so agents can find them before
   revealing them. `capture` refuses unmapped targets.
-- **Truncation is explicit.** When `max_nodes` or `max_depth` cuts the tree,
-  the response sets `truncated: true`, reports `node_count` for the nodes
+- Truncation is explicit. When `max_nodes` or `max_depth` cuts the tree, the
+  response sets `truncated: true`, reports `node_count` for the nodes
   returned, and marks each cut node with `children_truncated: true` plus the
   omitted count when known. `max_nodes` is one budget for all roots: roots
   that no longer fit are left out and counted in `omitted_roots`.
-- **Ordering is GTK child order**, followed by detached content.
+- Nodes come in GTK child order, followed by detached content.
 
 ## Text and redaction
 
@@ -225,17 +226,18 @@ Secrecy follows `plan.md` 4.4:
 
 ## Comparing snapshots
 
-The broker retains recent snapshots per session (`--retain-snapshots`) and
+The broker keeps recent snapshots per session (`--retain-snapshots`) and
 offers:
 
 ```json
 { "tool": "diff_snapshots", "session": "s1", "from": "snap-1041", "to": "snap-1042" }
 ```
 
-The diff reports, per widget ref: added nodes, removed nodes, and changed
+For each widget ref, the diff reports added nodes, removed nodes, and changed
 nodes with the fields that changed (`state.sensitive`, `text`, `attached`,
-child count, allocation size). It compares snapshot data only and does not
-claim why a change happened. Evicted snapshots return `snapshot_unavailable`.
+child count, allocation size). It compares snapshot data only and makes no
+claim about why a change happened. Evicted snapshots return
+`snapshot_unavailable`.
 
 ## Worked flow
 
