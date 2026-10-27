@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in gtk-mcp does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include the tool you called, its arguments and what the broker returned.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: gtk-mcp version
+      description: Output of `gtk-mcp --version`, or the git commit.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Environment
+      description: Distribution, GTK version (`pkg-config --modversion gtk4`), compositor.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Logs
+      description: Broker stderr and any relevant app logs.

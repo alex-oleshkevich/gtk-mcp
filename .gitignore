@@ -4,6 +4,14 @@
 .beads/proxieddb/
 *.gate.lock*
 
+# Local agent tooling (not part of the project)
+.agents/
+.claude/
+.codex/
+.cursor/
+/AGENTS.md
+/CLAUDE.md
+
 # Rust
 /target/
 /spikes/*/target/
