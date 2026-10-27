@@ -39,13 +39,21 @@ Widget pictures come from GTK itself, not from the screen. So a capture works ev
 
 ## Install
 
-You need Rust and GTK 4.10 or newer. Build the broker:
+Download a prebuilt broker for Linux or macOS (x86_64 or arm64) from the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alex-oleshkevich/gtk-mcp/main/install.sh | sh
+```
+
+This puts `gtk-mcp` in `~/.local/bin`. To pick a version or another directory, set `GTK_MCP_VERSION=v0.1.0` or `BIN_DIR=/some/dir` before `sh`.
+
+To build it yourself instead, you need Rust and GTK 4.10 or newer:
 
 ```sh
 cargo build --release -p gtk-mcp
 ```
 
-The binary is `target/release/gtk-mcp`. Add it to your MCP client as a stdio server:
+The binary is then `target/release/gtk-mcp`. Either way, add it to your MCP client as a stdio server:
 
 ```json
 {
