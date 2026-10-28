@@ -109,7 +109,7 @@ impl Server {
         self.run("list_windows", p, ctx).await
     }
 
-    #[tool(description = "Capture the widget tree of a GTK app (view full|semantic, format text|json). Returns a snapshot_id retained by the broker for diff_snapshots.", annotations(read_only_hint = true))]
+    #[tool(description = "Capture the widget tree of a GTK app (view full|semantic, format text|json). Optional root is a ref or selector (target is an alias); omitted: all toplevels. Unknown parameter keys are rejected. Returns a snapshot_id retained by the broker for diff_snapshots.", annotations(read_only_hint = true))]
     async fn snapshot(&self, Parameters(p): Parameters<SnapshotParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("snapshot", p, ctx).await
     }
@@ -179,7 +179,7 @@ impl Server {
         self.run("inspect_model", p, ctx).await
     }
 
-    #[tool(description = "Render a widget, window or popover to a PNG screenshot via GTK (settled by default). Returns capture metadata plus the image; capture_id is retained for diff_captures.", annotations(read_only_hint = true))]
+    #[tool(description = "Render a widget, window or popover to a PNG screenshot via GTK (settled by default). After temporary CSS changes, the first settled capture per native requests a fresh frame; unchanged clean captures need no new frame. A timed-out frame is reported stale, never current. Returns capture metadata plus the image; capture_id is retained for diff_captures.", annotations(read_only_hint = true))]
     async fn capture(&self, Parameters(p): Parameters<CaptureParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("capture", p, ctx).await
     }
@@ -204,17 +204,17 @@ impl Server {
         self.run("inspect_style", p, ctx).await
     }
 
-    #[tool(description = "Install temporary CSS on the display; parse diagnostics carry line/column (invalid CSS installs nothing). Returns a handle; reverted by remove_css or when this client disconnects.", annotations(destructive_hint = true))]
+    #[tool(description = "Install temporary CSS on the display; parse diagnostics carry line/column (invalid CSS installs nothing). Returns a handle; reverted by remove_css or when this client disconnects. Requests a post-change frame on every mapped native, including popovers; reports settled and settled_reason (null on success, otherwise no_frame_clock, no_frame or cancelled).", annotations(destructive_hint = true))]
     async fn apply_css(&self, Parameters(p): Parameters<ApplyCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("apply_css", p, ctx).await
     }
 
-    #[tool(description = "Remove one temporary CSS provider by handle.", annotations(destructive_hint = true))]
+    #[tool(description = "Remove one temporary CSS provider by handle. Waits for a post-change frame on every mapped native, including popovers; reports settled and settled_reason (null on success, otherwise no_frame_clock, no_frame or cancelled). Nothing mapped counts as settled; a mapped native without a clock does not.", annotations(destructive_hint = true))]
     async fn remove_css(&self, Parameters(p): Parameters<RemoveCssParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("remove_css", p, ctx).await
     }
 
-    #[tool(description = "Outline a widget for a human (temporary CSS class gtk-mcp-highlight), clearing this client's previous highlight; omit target to just clear. Reverted on disconnect.", annotations(destructive_hint = true))]
+    #[tool(description = "Outline a widget for a human (temporary CSS class gtk-mcp-highlight), clearing this client's previous highlight; omit target to just clear. Reverted on disconnect. Waits for a post-change frame on every mapped native, including popovers; reports settled and settled_reason (null on success, otherwise no_frame_clock, no_frame or cancelled).", annotations(destructive_hint = true))]
     async fn highlight(&self, Parameters(p): Parameters<HighlightParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("highlight", p, ctx).await
     }

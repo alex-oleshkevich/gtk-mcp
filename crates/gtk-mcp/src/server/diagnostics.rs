@@ -30,12 +30,12 @@ impl Server {
         self.run("read_logs", p, ctx).await
     }
 
-    #[tool(description = "Measure rendering performance (GdkFrameClock) of a window over duration_ms (default 1000, max 10000): frame count, fps, frame interval statistics, missed frames and presentation times when the compositor reports them. An idle surface reports frames: 0.", annotations(read_only_hint = true))]
+    #[tool(description = "Measure rendering performance (GdkFrameClock) over duration_ms (default 1000, max 10000): paint_fps counts paint callbacks; presented_fps counts distinct complete compositor presentation timestamps (null without two timestamps). refresh_hz comes from reported refresh intervals, not a 60 Hz assumption. Returns paint interval statistics, missed frames, presentation timings and nonnegative latency statistics; invalid clock-domain latency samples are excluded and counted in presentation.latency_samples_discarded. An idle surface reports frames: 0.", annotations(read_only_hint = true))]
     async fn measure_frames(&self, Parameters(p): Parameters<MeasureFramesParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("measure_frames", p, ctx).await
     }
 
-    #[tool(description = "Start recording user interactions: capture-phase input controllers on every window and popover plus emission hooks on common signals. Emissions within 300 ms after real input count as human, others as app (heuristic); the agent's own actions are ignored.", annotations(read_only_hint = true))]
+    #[tool(description = "Start recording user interactions: capture-phase input controllers on every window and popover plus emission hooks on common signals. Initializes signal classes even when the app has no instances; unavailable hooks are listed in skipped_hooks without aborting recording. Emissions within 300 ms after real input count as human, others as app (heuristic); the agent's own actions are ignored.", annotations(read_only_hint = true))]
     async fn record(&self, Parameters(p): Parameters<RecordParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("record", p, ctx).await
     }

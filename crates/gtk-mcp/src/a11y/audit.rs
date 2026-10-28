@@ -27,6 +27,7 @@ struct Rule {
 const RULES: &[Rule] = &[
     Rule { name: "interactive_not_focusable", source: "gtk", severity: "warning", summary: "visible, sensitive interactive widget that keyboard focus cannot reach" },
     Rule { name: "icon_button_no_label", source: "gtk", severity: "warning", summary: "icon-only button without label or tooltip" },
+    Rule { name: "clickable_without_role", source: "gtk", severity: "warning", summary: "clickable widget (click gesture) whose accessible role is not interactive" },
     Rule { name: "small_target", source: "gtk", severity: "info", summary: "interactive widget smaller than 24x24 px" },
     Rule { name: "window_untitled", source: "gtk", severity: "warning", summary: "window without a title" },
     Rule { name: "missing_name", source: "atspi", severity: "error", summary: "interactive widget with an empty AT-SPI accessible name" },
@@ -36,6 +37,13 @@ const RULES: &[Rule] = &[
 
 fn is_interactive(n: &Value) -> bool {
     n["role"].as_str().is_some_and(|r| INTERACTIVE.contains(&r))
+}
+
+/// The node carries an application-added press-based gesture controller,
+/// beyond the widget type's GTK defaults, so it can be operated with pointer
+/// clicks even when its accessible role is not interactive (tray icons).
+fn is_clickable(n: &Value) -> bool {
+    n["clickable"].as_bool().unwrap_or(false)
 }
 
 fn has_focusable_descendant(n: &Value) -> bool {
@@ -102,7 +110,11 @@ fn walk(n: &Value, parent_type: &str, named_control_above: bool, cx: &mut Ctx) {
     let secret = n["secret"].as_bool().unwrap_or(false);
     // The inner GtkText of an entry is part of the entry's own accessible.
     let inner = ty == "GtkText" && !parent_type.is_empty() && parent_type != "GtkText";
-    let interactive = is_interactive(n) && !inner;
+    // Clickable widgets (click gesture) get the interactive checks even when
+    // their accessible role is not interactive (tray icons).
+    let clickable = is_clickable(n) && !inner;
+    let role_interactive = is_interactive(n);
+    let interactive = (role_interactive || clickable) && !inner;
     let joined = n["atspi"].is_object();
     let label_empty = n["label"].as_str().unwrap_or("").is_empty();
 
@@ -120,6 +132,14 @@ fn walk(n: &Value, parent_type: &str, named_control_above: bool, cx: &mut Ctx) {
                 "icon_button_no_label",
                 n,
                 format!("{ty} shows only the icon '{}' and has no label or tooltip to derive a name from", n["icon_name"].as_str().unwrap_or("")),
+                evidence(n),
+            );
+        }
+        if clickable && !role_interactive && !secret {
+            cx.report(
+                "clickable_without_role",
+                n,
+                format!("{ty} reacts to clicks (click gesture) but its role '{role}' is not interactive; give it role 'button' and a label"),
                 evidence(n),
             );
         }
@@ -203,6 +223,48 @@ mod tests {
             n["atspi"] = json!({"name": name, "role": "button"});
         }
         n
+    }
+
+    /// A tray icon: clickable (click gesture) but its role is not interactive.
+    fn clickable_image() -> Value {
+        json!({"ref": "w2", "type": "GtkImage", "role": "img", "mapped": true, "sensitive": true,
+            "clickable": true, "icon_name": "battery-good-symbolic", "platform_state": {"focusable": false},
+            "bounds": {"x": 0, "y": 0, "width": 16, "height": 16}, "children": []})
+    }
+
+    #[test]
+    fn clickable_widget_without_interactive_role_is_a_finding() {
+        let r = run(&[clickable_image()], &src(false), Some(&["clickable_without_role".to_string()])).unwrap();
+        let findings = r["findings"].as_array().unwrap();
+        let f = findings
+            .iter()
+            .find(|f| f["rule"] == "clickable_without_role")
+            .unwrap_or_else(|| panic!("a clickable_without_role finding: {r}"));
+        assert_eq!(f["ref"], "w2");
+        assert_eq!(f["severity"], "warning");
+        assert_eq!(f["source"], "gtk");
+        assert!(f["message"].as_str().unwrap().contains("'button'"), "{f}");
+    }
+
+    #[test]
+    fn clickable_widgets_get_the_interactive_checks() {
+        let rules = ["interactive_not_focusable".to_string(), "small_target".to_string()];
+        let r = run(&[clickable_image()], &src(false), Some(&rules)).unwrap();
+        let findings = r["findings"].as_array().unwrap();
+        assert!(findings.iter().any(|f| f["rule"] == "interactive_not_focusable" && f["ref"] == "w2"), "{r}");
+        assert!(findings.iter().any(|f| f["rule"] == "small_target" && f["ref"] == "w2"), "{r}");
+    }
+
+    #[test]
+    fn interactive_role_or_no_click_fact_is_not_a_clickable_finding() {
+        // A real button has an interactive role: no clickable_without_role finding.
+        let r = run(&[button(None)], &src(false), Some(&["clickable_without_role".to_string()])).unwrap();
+        assert!(r["findings"].as_array().unwrap().is_empty(), "{r}");
+        // A non-clickable image is not interactive at all: nothing reported.
+        let mut img = clickable_image();
+        img.as_object_mut().unwrap().remove("clickable");
+        let r = run(&[img], &src(false), None).unwrap();
+        assert!(!r["findings"].as_array().unwrap().iter().any(|f| f["ref"] == "w2"), "{r}");
     }
 
     #[test]

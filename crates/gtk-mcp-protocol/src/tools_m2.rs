@@ -98,6 +98,10 @@ pub struct InspectShortcutsParams {
     /// Omitted: every window of the app, plus the application's accelerators.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
+    /// Maximum controller and application-accelerator entries returned in
+    /// total (default 200); `total` includes omitted entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

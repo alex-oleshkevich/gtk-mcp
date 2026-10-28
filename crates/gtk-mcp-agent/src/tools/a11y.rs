@@ -4,18 +4,21 @@
 //! parent/children, bounds and platform state. Name, description, states and
 //! relations have no in-process getter; the broker adds them from AT-SPI
 //! (plan 3.2, 8). Nodes also carry the widget facts the broker's audit rules
-//! need (label, tooltip, icon name, sensitivity, mapping); secret widgets carry
-//! none of them.
+//! need (label, tooltip, icon name, sensitivity, mapping, click gestures);
+//! secret widgets carry none of them.
 
 use crate::agent::Agent;
+use crate::tools::shortcuts::controllers_of;
 use crate::{secrecy, selector, widgets};
 use glib::prelude::*;
+use glib::translate::*;
 use gtk4 as gtk;
 use gtk4::prelude::*;
 use gtk4::prelude::GtkWindowExt;
 use gtk_mcp_protocol::{AccessibleTreeParams, AgentError, ErrorCode, InspectAccessibleParams, TraceFocusOrderParams};
 use serde_json::{Map, Value, json};
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 const DEFAULT_MAX_DEPTH: usize = 64;
@@ -52,7 +55,111 @@ fn icon_name(w: &gtk::Widget) -> Option<String> {
     None
 }
 
-/// Facts about one accessible shared by the tree and `inspect_accessible`.
+struct ClickControllers {
+    defaults: HashMap<glib::Type, usize>,
+    selectable_label: Option<HashMap<glib::Type, usize>>,
+}
+
+thread_local! {
+    static DEFAULT_CLICK_CONTROLLERS: RefCell<HashMap<glib::Type, Option<ClickControllers>>> = RefCell::new(HashMap::new());
+}
+
+fn click_controller_counts(w: &gtk::Widget) -> HashMap<glib::Type, usize> {
+    let mut counts = HashMap::new();
+    for c in controllers_of(w) {
+        if c.is::<gtk::GestureSingle>() {
+            *counts.entry(c.type_()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn default_click_controllers(type_: glib::Type) -> Option<ClickControllers> {
+    // Roots/natives can register toplevels or create surfaces during construction.
+    // Initializable types need their own constructor, not a bare g_object_new().
+    if type_.is_a(gtk::Native::static_type()) || type_.is_a(gtk::Root::static_type())
+        || type_.is_a(gio::Initable::static_type()) || type_.is_a(gio::AsyncInitable::static_type())
+    {
+        return None;
+    }
+    // SAFETY: the type comes from a live GtkWidget. Check its construction flags
+    // before creating a temporary unparented instance, and sink its floating ref
+    // just as glib::Object::with_type does. A failed constructor is not evidence
+    // of an application-added gesture.
+    let sample: gtk::Widget = unsafe {
+        if glib::gobject_ffi::g_type_test_flags(type_.into_glib(), glib::gobject_ffi::G_TYPE_FLAG_ABSTRACT) != 0
+            || glib::gobject_ffi::g_type_test_flags(type_.into_glib(), glib::gobject_ffi::G_TYPE_FLAG_INSTANTIATABLE) == 0
+        {
+            return None;
+        }
+        let ptr = glib::gobject_ffi::g_object_new_with_properties(type_.into_glib(), 0, std::ptr::null_mut(), std::ptr::null());
+        if ptr.is_null() {
+            return None;
+        }
+        let object: glib::Object = from_glib_none(ptr);
+        object.downcast().ok()?
+    };
+    let defaults = click_controller_counts(&sample);
+    // Labels install selection/link gestures on demand, rather than in init.
+    // Measure that GTK-owned set too, using the same throwaway instance.
+    let selectable_label = sample.downcast_ref::<gtk::Label>().map(|label| {
+        label.set_selectable(true);
+        click_controller_counts(&sample)
+    });
+    Some(ClickControllers { defaults, selectable_label })
+}
+
+fn is_internal_click_target(w: &gtk::Widget) -> bool {
+    // Private list rows acquire gestures when a model/factory configures them.
+    if widgets::type_matches(w, "GtkListItemBase") {
+        return true;
+    }
+    if !w.type_().name().starts_with("Gtk") {
+        return false;
+    }
+    let mut child = w.clone();
+    while let Some(parent) = child.parent() {
+        // Explicit application identities distinguish app content from unnamed
+        // implementation widgets inside a GTK composite.
+        if widgets::automation_id(&child).is_some() || widgets::buildable_id(&child).is_some() {
+            return false;
+        }
+        if parent.is::<gtk::SpinButton>() || parent.is::<gtk::DropDown>() {
+            return true;
+        }
+        if let Some(expander) = parent.downcast_ref::<gtk::Expander>() {
+            return expander.child().as_ref() != Some(&child) && expander.label_widget().as_ref() != Some(&child);
+        }
+        child = parent;
+    }
+    false
+}
+
+/// Only extra press-based gestures count as application click handling. GTK's
+/// own gestures (selection, scrolling, window management, etc.) are not controls
+/// that the application forgot to expose to assistive technology.
+fn has_click_controller(w: &gtk::Widget) -> bool {
+    if is_internal_click_target(w) {
+        return false;
+    }
+    let counts = click_controller_counts(w);
+    if counts.is_empty() {
+        return false;
+    }
+    DEFAULT_CLICK_CONTROLLERS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(baseline) = cache.entry(w.type_()).or_insert_with(|| default_click_controllers(w.type_())) else {
+            return false;
+        };
+        let defaults = if w.downcast_ref::<gtk::Label>().is_some_and(|l| l.is_selectable() || l.has_css_class("link")) {
+            baseline.selectable_label.as_ref().unwrap_or(&baseline.defaults)
+        } else {
+            &baseline.defaults
+        };
+        counts.iter().any(|(type_, count)| *count > defaults.get(type_).copied().unwrap_or(0))
+    })
+}
+
 fn node_facts(agent: &Agent, a: &gtk::Accessible) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("ref".into(), json!(agent.registry.ref_for(a)));
@@ -83,6 +190,9 @@ fn node_facts(agent: &Agent, a: &gtk::Accessible) -> Map<String, Value> {
             }
             if let Some(i) = icon_name(w) {
                 m.insert("icon_name".into(), json!(i));
+            }
+            if has_click_controller(w) {
+                m.insert("clickable".into(), json!(true));
             }
         }
     }

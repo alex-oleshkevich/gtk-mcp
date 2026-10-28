@@ -425,7 +425,7 @@ async fn inspect_shortcuts_lists_controllers_triggers_actions_and_app_accels() {
     let display = require_display!();
     let fx = Fixture::start(&display, &[]);
     let c = rw(&fx);
-    let r = c.json("inspect_shortcuts", json!({})).await;
+    let r = c.json("inspect_shortcuts", json!({"max_items": u32::MAX})).await;
     let ctrls = r["controllers"].as_array().unwrap();
     let managed = ctrls.iter().find(|x| x["name"] == "m2-window-shortcuts").unwrap_or_else(|| panic!("{r}"));
     assert_eq!(managed["scope"], "managed");
@@ -443,8 +443,9 @@ async fn inspect_shortcuts_lists_controllers_triggers_actions_and_app_accels() {
     let local = ctrls.iter().find(|x| x["name"] == "m2-entry-shortcuts").unwrap();
     assert_eq!(local["scope"], "local");
     assert_eq!(local["widget"]["automation_id"], "m2-shortcut-entry");
-    assert_eq!(r["total"].as_u64().unwrap() as usize, ctrls.len());
     let accels = r["app_accels"].as_array().unwrap();
+    assert_eq!(r["total"].as_u64().unwrap() as usize, ctrls.len() + accels.len());
+    assert_eq!(r["truncated"], false);
     assert!(accels.iter().any(|a| a["action"] == "win.theme::dark" && a["accels"] == json!(["<Control><Alt>d"])), "{accels:?}");
 
     // scoped to a widget subtree

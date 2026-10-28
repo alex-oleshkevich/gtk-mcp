@@ -8,6 +8,8 @@ use libadwaita as adw;
 
 mod m3;
 mod m6;
+mod minimal;
+mod m_tray;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -387,6 +389,10 @@ fn main() -> glib::ExitCode {
             existing.present();
             return;
         }
+        if std::env::var_os("FIXTURE_MINIMAL").is_some() {
+            minimal::build_window(app).present();
+            return;
+        }
         let win = build_window(app);
         win.present();
         // gm-66t regression surfaces: a real layer-shell panel and/or a
@@ -396,6 +402,9 @@ fn main() -> glib::ExitCode {
         }
         if std::env::var_os("FIXTURE_SESSION_LOCK").is_some() {
             spawn_session_lock();
+        }
+        if std::env::var_os("FIXTURE_TRAY").is_some() {
+            m_tray::spawn(app);
         }
     });
     app.run()

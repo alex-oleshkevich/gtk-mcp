@@ -160,19 +160,28 @@ pub fn inspect_shortcuts(agent: &Rc<Agent>, p: InspectShortcutsParams) -> Result
             }
         }
     }
+    let max_items = p.max_items.unwrap_or(200) as usize;
+    let mut total = 0usize;
     let mut controllers = Vec::new();
     for w in &widgets_all {
         for c in shortcut_controllers(w) {
-            controllers.push(controller_json(agent, w, &c));
+            total += 1;
+            if controllers.len() < max_items {
+                controllers.push(controller_json(agent, w, &c));
+            }
         }
     }
+    let remaining = max_items.saturating_sub(controllers.len());
     let mut m = Map::new();
-    m.insert("total".into(), json!(controllers.len()));
+    let accels = if p.target.is_none() { app_accels(agent) } else { Vec::new() };
+    total += accels.len();
+    m.insert("total".into(), json!(total));
+    m.insert("truncated".into(), json!(total > max_items));
     m.insert("controllers".into(), Value::Array(controllers));
     if p.target.is_none() {
         m.insert(
             "app_accels".into(),
-            Value::Array(app_accels(agent).into_iter().map(|(a, k)| json!({"action": a, "accels": k})).collect()),
+            Value::Array(accels.into_iter().take(remaining).map(|(a, k)| json!({"action": a, "accels": k})).collect()),
         );
     }
     Ok(Value::Object(m))

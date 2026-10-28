@@ -19,7 +19,7 @@ impl Server {
         self.run("inspect_accessible", p, ctx).await
     }
 
-    #[tool(description = "Audit accessibility and report findings with ref and evidence: non-focusable interactive widgets, icon-only buttons without label, small targets, untitled windows; with --allow-atspi also empty accessible names, unnamed images, unexported widgets. AT-SPI rules are reported skipped (with reason) when the source is off.", annotations(read_only_hint = true))]
+    #[tool(description = "Audit accessibility and report findings with ref and evidence: non-focusable interactive widgets, icon-only buttons without label, clickable widgets without an interactive role (e.g. tray icons with a click gesture), small targets, untitled windows; with --allow-atspi also empty accessible names, unnamed images, unexported widgets. AT-SPI rules are reported skipped (with reason) when the source is off.", annotations(read_only_hint = true))]
     async fn audit_accessibility(&self, Parameters(p): Parameters<AuditAccessibilityParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("audit_accessibility", p, ctx).await
     }

@@ -41,7 +41,7 @@ impl Server {
         self.run("inspect_menu", p, ctx).await
     }
 
-    #[tool(description = "List keyboard shortcuts: shortcut controllers (local, managed, global) with trigger strings and actions, plus the application's accelerators.", annotations(read_only_hint = true))]
+    #[tool(description = "List keyboard shortcuts: shortcut controllers (local, managed, global) with trigger strings and actions, plus the application's accelerators when target is omitted. max_items bounds controller and application-accelerator entries together (default 200); total includes omitted entries and truncated reports whether any were cut.", annotations(read_only_hint = true))]
     async fn inspect_shortcuts(&self, Parameters(p): Parameters<InspectShortcutsParams>, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         self.run("inspect_shortcuts", p, ctx).await
     }

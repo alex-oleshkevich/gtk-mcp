@@ -437,6 +437,7 @@ pub fn record(agent: &Rc<Agent>, _p: RecordParams, ctx: &Ctx) -> Result<Value, A
         (Kind::ActionChangeState, gio::SimpleAction::static_type(), "change-state"),
     ];
     let mut hooked = Vec::new();
+    let mut skipped_hooks = Vec::new();
     for (kind, ty, name) in table {
         let weak = Rc::downgrade(&rec);
         let listener: hooks::Listener = Rc::new(move |instance, values| {
@@ -449,10 +450,7 @@ pub fn record(agent: &Rc<Agent>, _p: RecordParams, ctx: &Ctx) -> Result<Value, A
                 rec.hooks.borrow_mut().push(id);
                 hooked.push(kind.signal());
             }
-            None => {
-                teardown(&rec);
-                return Err(AgentError::new(ErrorCode::Unavailable, format!("cannot hook {}", kind.signal())));
-            }
+            None => skipped_hooks.push(kind.signal()),
         }
     }
     // Windows and popovers created later get their controller when they are mapped.
@@ -469,11 +467,13 @@ pub fn record(agent: &Rc<Agent>, _p: RecordParams, ctx: &Ctx) -> Result<Value, A
         });
         if let Some(id) = hooks::add(gtk::Widget::static_type(), "map", l) {
             rec.hooks.borrow_mut().push(id);
+        } else {
+            skipped_hooks.push("GtkWidget::map");
         }
     }
     let controllers = rec.installed.borrow().len();
     RECORDER.with(|r| *r.borrow_mut() = Some(rec));
-    Ok(json!({"recording": true, "hooks": hooked, "controllers": controllers, "human_window_ms": HUMAN_WINDOW_MS}))
+    Ok(json!({"recording": true, "hooks": hooked, "skipped_hooks": skipped_hooks, "controllers": controllers, "human_window_ms": HUMAN_WINDOW_MS}))
 }
 
 fn teardown(rec: &Rc<Recorder>) {

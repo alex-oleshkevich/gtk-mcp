@@ -48,11 +48,12 @@ pub struct ListWindowsParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotParams {
     #[serde(default = "default_session")]
     pub session: String,
-    /// A ref or selector; omitted: all toplevels.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A ref or selector; `target` is an alias. Omitted: all toplevels.
+    #[serde(default, alias = "target", skip_serializing_if = "Option::is_none")]
     pub root: Option<Target>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<SnapshotView>,

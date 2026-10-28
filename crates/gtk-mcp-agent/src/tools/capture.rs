@@ -4,13 +4,13 @@
 //! settle -> `GtkWidgetPaintable` snapshot -> the native's renderer
 //! `render_texture` -> PNG.
 //!
-//! Settle (plan 5.3, refined by spike S2): a `GtkWidgetPaintable` created now
-//! tells whether GTK holds a current render node for the widget. Clean: every
-//! change since its last paint would have invalidated the node, so the last
-//! frame is the settled state and no frame is requested. Dirty: the frame that
-//! paints the pending changes is already requested; wait for the frame clock's
-//! `after-paint` that follows this request, bounded by `settle_timeout_ms`. No
-//! frame in time: render the last frame an earlier capture saw with
+//! Clean render nodes normally need no new frame. Display-wide CSS changes can
+//! leave an apparently clean node behind, so the first settled capture of each
+//! native after a provider change requests a post-change frame and waits for
+//! its clock to go quiet, including any theme transitions.
+//! Dirty widgets also wait for the frame clock's next `after-paint`, bounded by
+//! `settle_timeout_ms`. No frame in time: render the last frame an earlier
+//! capture saw with
 //! `stale: true, stale_reason: "no_frame"`, or fail `capture_unavailable` when
 //! there is none. The last-frame fallback is never served when the target
 //! subtree contains a secret `Entry`/`Text`: that frame may have been painted
@@ -68,8 +68,11 @@ struct PaintWatch {
 impl PaintWatch {
     fn new(clock: gdk::FrameClock) -> Self {
         let (tx, rx) = async_channel::bounded::<()>(1);
-        let id = clock.connect_after_paint(move |_| {
-            let _ = tx.try_send(());
+        let before = clock.frame_counter();
+        let id = clock.connect_after_paint(move |clock| {
+            if clock.frame_counter() > before {
+                let _ = tx.try_send(());
+            }
         });
         Self { clock, id: Some(id), rx }
     }
@@ -107,6 +110,8 @@ thread_local! {
     /// widget's paints, so they hold its last frame when a later request finds
     /// the widget dirty and gets no new frame.
     static FRAMES: std::cell::RefCell<Vec<(glib::WeakRef<gtk::Widget>, gtk::WidgetPaintable)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The last CSS generation captured freshly on each native surface.
+    static STYLE_FRAMES: std::cell::RefCell<Vec<(glib::WeakRef<gtk::Native>, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 fn remember_frame(w: &gtk::Widget, p: &gtk::WidgetPaintable) {
@@ -129,6 +134,23 @@ fn last_frame(w: &gtk::Widget) -> Option<gtk::WidgetPaintable> {
             .map(|(_, p)| p.clone())
             .filter(has_render_data)
     })
+}
+
+fn captured_style(native: &gtk::Native) -> u64 {
+    STYLE_FRAMES.with(|f| {
+        f.borrow().iter().find(|(wk, _)| wk.upgrade().as_ref() == Some(native)).map_or(0, |(_, generation)| *generation)
+    })
+}
+
+fn remember_style(native: &gtk::Native, generation: u64) {
+    STYLE_FRAMES.with(|f| {
+        let mut f = f.borrow_mut();
+        f.retain(|(wk, _)| wk.upgrade().is_some_and(|n| &n != native));
+        if f.len() == FRAME_CACHE {
+            f.remove(0);
+        }
+        f.push((native.downgrade(), generation));
+    });
 }
 
 /// Does the subtree rooted at `w` (inclusive) contain a secret `Entry`/`Text`,
@@ -207,29 +229,29 @@ pub async fn capture_widget(
         .frame_clock()
         .ok_or_else(|| AgentError::new(ErrorCode::CaptureUnavailable, "the widget has no frame clock (not realized)"))?;
 
-    // A `GtkWidgetPaintable` holds the widget's render node as of its creation
-    // and follows every later paint. Created while the widget is clean it is
-    // the last frame; created while the widget has pending changes (no render
-    // node) it stays empty until the next frame paints the widget.
-    let paintable = gtk::WidgetPaintable::new(Some(w));
+    let style_generation = super::style::generation();
+    let style_changed = captured_style(&native) != style_generation;
+    // A clean render node is only trustworthy when no provider changed since
+    // this native's last fresh capture.
+    let mut paintable = gtk::WidgetPaintable::new(Some(w));
     let clean = has_render_data(&paintable);
 
     let mut stale = false;
     let mut stale_reason = None;
     let mut source = paintable.clone();
-    if settle && clean {
-        // GTK holds a current render node for the widget: every change since
-        // its last paint would have invalidated it, so the last frame is the
-        // settled state. No extra frame is requested; compositors may delay
-        // consecutive frames (spike S2: ~1 s apart on a nested niri), and an
-        // idle widget must not cost a frame.
+    if settle && clean && !style_changed {
+        // An unchanged, clean native needs no extra compositor frame.
     } else if settle {
-        // Pending changes: the frame that paints them is already requested.
-        // Connect before asking again so it cannot be missed; any
-        // `after-paint` seen afterwards started after this request.
+        // Connect before requesting a frame; reject after-paint for a frame
+        // that was already in progress when the style changed.
         let watch = PaintWatch::new(clock.clone());
+        let style_watch = style_changed.then(|| super::style::PaintWatch::new(clock.clone()));
         let surface = native.surface();
         let request_frame = || {
+            if style_changed {
+                native.upcast_ref::<gtk::Widget>().queue_resize();
+                native.upcast_ref::<gtk::Widget>().queue_draw();
+            }
             w.queue_draw();
             if let Some(s) = &surface {
                 // `queue_draw` requests no render when the widget is already
@@ -250,22 +272,33 @@ pub async fn capture_widget(
                 stale_reason = Some("no_frame".to_string());
                 break;
             }
-            // A frame was painted. It only settles the request when it drew
-            // the widget; otherwise ask again until the timeout.
+            if let Some(watch) = &style_watch {
+                if let Err(reason) = watch.wait_quiet(ctx, until).await {
+                    ctx.check()?;
+                    stale = true;
+                    stale_reason = Some(reason.to_string());
+                    break;
+                }
+            }
+            // Paintables update in a high-priority idle after the paint. A
+            // new paintable also avoids trusting a pre-restyle cached image.
+            glib::timeout_future(Duration::from_millis(0)).await;
+            paintable = gtk::WidgetPaintable::new(Some(w));
             if has_render_data(&paintable) {
+                source = paintable.clone();
                 break;
             }
             request_frame();
         }
         if stale {
-            // Changes are pending and no frame came: the best available image
-            // is the last one an earlier capture saw.
+            // No final frame arrived within the budget. Preserve the reason,
+            // distinguishing a stalled clock from one that is still animating.
             source = fallback_frame(w).ok_or_else(|| {
                 AgentError::new(
                     ErrorCode::CaptureUnavailable,
-                    "no frame was painted within the settle timeout and there is no earlier frame of this widget",
+                    "no settled frame was painted within the settle timeout and there is no earlier frame of this widget",
                 )
-                .with_data(serde_json::json!({"reason": "no_frame"}))
+                .with_data(serde_json::json!({"reason": stale_reason}))
             })?;
         }
         // The paintable swaps its image in a high-priority idle after the paint.
@@ -290,6 +323,9 @@ pub async fn capture_widget(
 
     let (png, width, height, annotations) = render(agent, w, &source, &native, scale, annotate)?;
     remember_frame(w, &source);
+    if settle && !stale {
+        remember_style(&native, style_generation);
+    }
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
     if b64.len() + 4096 > MAX_FRAME_BYTES {
         return Err(AgentError::new(

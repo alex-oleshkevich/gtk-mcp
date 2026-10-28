@@ -39,7 +39,9 @@ impl Broker {
         }
         Err(AgentError::new(
             ErrorCode::LaunchDisabled,
-            format!("'{tool}' manages app processes; start the broker with --allow-launch"),
+            format!(
+                "'{tool}' manages app processes; add --allow-launch to the gtk-mcp server args in your MCP client config (e.g. the .mcp.json args array), then restart the broker"
+            ),
         ))
     }
 

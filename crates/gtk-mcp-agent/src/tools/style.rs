@@ -18,7 +18,7 @@ use gtk_mcp_protocol::{
     AgentError, ApplyCssParams, ErrorCode, HighlightParams, InspectStyleParams, RemoveCssParams,
 };
 use serde_json::{Value, json};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,7 @@ const MAX_CSS_BYTES: usize = 256 * 1024;
 const MAX_PROVIDERS_PER_CONN: usize = 64;
 const SETTLE_TIMEOUT: Duration = Duration::from_millis(2000);
 const SLICE: Duration = Duration::from_millis(25);
+const QUIET_PERIOD: Duration = Duration::from_millis(40);
 
 struct CssEntry {
     handle: String,
@@ -44,11 +45,24 @@ struct CssEntry {
 #[derive(Default)]
 struct CssState {
     next: u64,
+    generation: u64,
     entries: Vec<CssEntry>,
 }
 
 thread_local! {
     static CSS: RefCell<CssState> = RefCell::new(CssState::default());
+}
+
+/// Changes to display-wide providers invalidate even apparently clean render nodes.
+pub fn generation() -> u64 {
+    CSS.with(|c| c.borrow().generation)
+}
+
+fn style_changed() {
+    CSS.with(|c| {
+        let mut c = c.borrow_mut();
+        c.generation = c.generation.wrapping_add(1);
+    });
 }
 
 fn install(conn: u64, css: &str, highlight: Option<&gtk::Widget>) -> Result<Installed, AgentError> {
@@ -87,6 +101,7 @@ fn install(conn: u64, css: &str, highlight: Option<&gtk::Widget>) -> Result<Inst
         return Ok(Installed { handle: None, diagnostics });
     }
     gtk::style_context_add_provider_for_display(&display, &provider, PRIORITY);
+    style_changed();
     let handle = CSS.with(|c| {
         let mut c = c.borrow_mut();
         c.next += 1;
@@ -116,6 +131,7 @@ fn provider_count() -> usize {
 /// highlight, the class leaves the widget unless another highlight holds it.
 fn uninstall(entry: CssEntry) {
     gtk::style_context_remove_provider_for_display(&entry.display, &entry.provider);
+    style_changed();
     let Some(w) = entry.highlight.and_then(|w| w.upgrade()) else { return };
     let still_held = CSS.with(|c| {
         c.borrow().entries.iter().any(|e| e.highlight.as_ref().and_then(|x| x.upgrade()).is_some_and(|x| x == w))
@@ -134,17 +150,37 @@ fn take_entries(pred: impl Fn(&CssEntry) -> bool) -> Vec<CssEntry> {
     })
 }
 
-/// Ask every mapped toplevel for a frame, so a restyle caused by removing CSS
-/// reaches the screen (and the render nodes `capture` reads) without waiting
-/// for unrelated activity.
-fn request_frames() {
-    for win in selector::toplevels() {
-        if win.is_mapped() {
-            win.queue_draw();
-            if let Some(surface) = win.surface() {
-                surface.queue_render();
-            }
+/// Include nested native surfaces (notably popovers), not just windows.
+fn mapped_natives() -> Vec<gtk::Widget> {
+    fn collect(w: &gtk::Widget, out: &mut Vec<gtk::Widget>) {
+        if w.is_mapped() && w.is::<gtk::Native>() {
+            out.push(w.clone());
         }
+        let mut child = w.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            collect(&w, out);
+        }
+    }
+    let mut out = Vec::new();
+    for win in selector::toplevels() {
+        collect(win.upcast_ref(), &mut out);
+    }
+    out
+}
+
+fn request_frame(w: &gtk::Widget) {
+    w.queue_resize();
+    w.queue_draw();
+    if let Some(surface) = w.native().and_then(|n| n.surface()) {
+        surface.queue_render();
+    }
+}
+
+/// Disconnect cleanup cannot await, but must still request the restyle.
+fn request_frames() {
+    for native in mapped_natives() {
+        request_frame(&native);
     }
 }
 
@@ -169,19 +205,45 @@ pub fn release_all() {
 
 // -- waiting for the restyle to reach a frame ------------------------------------
 
-struct PaintWatch {
+pub(super) struct PaintWatch {
     clock: gdk::FrameClock,
     id: Option<glib::SignalHandlerId>,
-    rx: async_channel::Receiver<()>,
+    last_paint: Rc<Cell<Option<Instant>>>,
 }
 
 impl PaintWatch {
-    fn new(clock: gdk::FrameClock) -> Self {
-        let (tx, rx) = async_channel::bounded::<()>(1);
-        let id = clock.connect_after_paint(move |_| {
-            let _ = tx.try_send(());
+    pub(super) fn new(clock: gdk::FrameClock) -> Self {
+        let last_paint = Rc::new(Cell::new(None));
+        let painted = last_paint.clone();
+        let before = clock.frame_counter();
+        let id = clock.connect_after_paint(move |clock| {
+            if clock.frame_counter() > before {
+                painted.set(Some(Instant::now()));
+            }
         });
-        Self { clock, id: Some(id), rx }
+        Self { clock, id: Some(id), last_paint }
+    }
+
+    fn is_quiet(&self, now: Instant) -> bool {
+        self.last_paint.get().is_some_and(|painted| now.duration_since(painted) >= QUIET_PERIOD)
+    }
+
+    /// CSS transitions can keep painting after the first post-change frame.
+    /// Only a quiet clock proves that the final appearance reached the node.
+    pub(super) async fn wait_quiet(&self, ctx: &Ctx, until: Instant) -> Result<(), &'static str> {
+        loop {
+            if ctx.is_cancelled() {
+                return Err("cancelled");
+            }
+            let now = Instant::now();
+            if self.is_quiet(now) {
+                return Ok(());
+            }
+            if now >= until {
+                return Err(if self.last_paint.get().is_some() { "animating" } else { "no_frame" });
+            }
+            glib::timeout_future(SLICE.min(until - now)).await;
+        }
     }
 }
 
@@ -193,45 +255,45 @@ impl Drop for PaintWatch {
     }
 }
 
-/// Style changes are applied by the next frame (the CSS node tree revalidates in
-/// the frame clock's update phase), so a capture right after a change could
-/// still show the old look. Request a frame on every mapped toplevel and wait,
-/// bounded, until each has painted. `true` when all did. Cancellation just
-/// ends the wait: the change is already installed and must still be reported.
-pub async fn settle_style(ctx: &Ctx) -> bool {
-    let mut watches = Vec::new();
-    for win in selector::toplevels() {
-        if !win.is_mapped() {
-            continue;
+/// Request a post-change frame on every mapped native, including popovers.
+/// A missing clock is not evidence that a mapped surface has settled.
+pub async fn settle_style(ctx: &Ctx) -> Result<(), &'static str> {
+    let natives = mapped_natives();
+    let mut watches = Vec::with_capacity(natives.len());
+    let mut missing_clock = false;
+    for native in &natives {
+        if let Some(clock) = native.frame_clock() {
+            watches.push(PaintWatch::new(clock));
+        } else {
+            missing_clock = true;
         }
-        let Some(clock) = win.frame_clock() else { continue };
-        watches.push(PaintWatch::new(clock));
-        win.queue_draw();
-        if let Some(surface) = win.surface() {
-            surface.queue_render();
-        }
+        request_frame(native);
+    }
+    if missing_clock {
+        return Err("no_frame_clock");
+    }
+    if natives.is_empty() {
+        return Ok(());
     }
     let mut budget = SETTLE_TIMEOUT;
     if let Some(rem) = ctx.remaining() {
         budget = budget.min(rem * 3 / 4);
     }
     let until = Instant::now() + budget;
-    let mut painted = vec![false; watches.len()];
     loop {
-        for (done, w) in painted.iter_mut().zip(&watches) {
-            if !*done && w.rx.try_recv().is_ok() {
-                *done = true;
-            }
+        if ctx.is_cancelled() {
+            return Err("cancelled");
         }
-        if painted.iter().all(|d| *d) {
-            // Let paintables pick up the new frame (they swap in an idle).
+        let now = Instant::now();
+        if watches.iter().all(|watch| watch.is_quiet(now)) {
+            // Let paintables pick up the final frame (they swap in an idle).
             glib::timeout_future(Duration::from_millis(0)).await;
-            return true;
+            return Ok(());
         }
-        if ctx.is_cancelled() || Instant::now() >= until {
-            return false;
+        if now >= until {
+            return Err(if watches.iter().any(|watch| watch.last_paint.get().is_none()) { "no_frame" } else { "animating" });
         }
-        glib::timeout_future(SLICE).await;
+        glib::timeout_future(SLICE.min(until - now)).await;
     }
 }
 
@@ -245,7 +307,7 @@ pub async fn wait_one_paint(w: &gtk::Widget, clock: gdk::FrameClock, ctx: &Ctx, 
     }
     let until = Instant::now() + timeout;
     loop {
-        if watch.rx.try_recv().is_ok() {
+        if watch.last_paint.get().is_some() {
             glib::timeout_future(Duration::from_millis(0)).await;
             return true;
         }
@@ -275,7 +337,8 @@ pub async fn apply_css(_agent: &Rc<Agent>, p: ApplyCssParams, ctx: &Ctx) -> Resu
         "priority": PRIORITY,
         "diagnostics": installed.diagnostics,
         "providers": provider_count(),
-        "settled": settled,
+        "settled": settled.is_ok(),
+        "settled_reason": settled.err(),
     }))
 }
 
@@ -293,7 +356,7 @@ pub async fn remove_css(p: RemoveCssParams, ctx: &Ctx) -> Result<Value, AgentErr
                 uninstall(e);
             }
             let settled = settle_style(ctx).await;
-            Ok(json!({"removed": true, "handle": p.handle, "providers": provider_count(), "settled": settled}))
+            Ok(json!({"removed": true, "handle": p.handle, "providers": provider_count(), "settled": settled.is_ok(), "settled_reason": settled.err()}))
         }
     }
 }
@@ -312,7 +375,7 @@ pub async fn highlight(agent: &Rc<Agent>, p: HighlightParams, ctx: &Ctx) -> Resu
     }
     let Some(w) = target else {
         let settled = settle_style(ctx).await;
-        return Ok(json!({"highlighted": false, "cleared": cleared, "settled": settled}));
+        return Ok(json!({"highlighted": false, "cleared": cleared, "settled": settled.is_ok(), "settled_reason": settled.err()}));
     };
     // Install first: a failed install must not touch the class, which another
     // client's highlight of the same widget may hold.
@@ -327,7 +390,8 @@ pub async fn highlight(agent: &Rc<Agent>, p: HighlightParams, ctx: &Ctx) -> Resu
         "target": agent.registry.ref_for(&w),
         "handle": handle,
         "cleared": cleared,
-        "settled": settled,
+        "settled": settled.is_ok(),
+        "settled_reason": settled.err(),
     }))
 }
 

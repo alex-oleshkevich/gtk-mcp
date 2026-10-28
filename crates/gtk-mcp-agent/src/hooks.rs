@@ -57,7 +57,21 @@ unsafe extern "C" fn trampoline(
 /// Hook `signal` of `type_` (or an ancestor/interface declaring it). `None`
 /// when the signal does not exist or cannot be hooked.
 pub fn add(type_: glib::Type, signal: &str, listener: Listener) -> Option<ListenerId> {
-    let sid = glib::subclass::SignalId::lookup(signal, type_)?;
+    // `static_type()` only registers the type. Signals are registered by class
+    // (or default interface) initialization, even before the first instance.
+    let _class = glib::Class::<glib::Object>::from_type(type_);
+    let interface = if type_.is_a(glib::Type::INTERFACE) {
+        // SAFETY: `type_` is an interface; balance the ref after the lookup.
+        unsafe { glib::gobject_ffi::g_type_default_interface_ref(type_.into_glib()) }
+    } else {
+        std::ptr::null_mut()
+    };
+    let sid = glib::subclass::SignalId::lookup(signal, type_);
+    if !interface.is_null() {
+        // SAFETY: this is the reference acquired above.
+        unsafe { glib::gobject_ffi::g_type_default_interface_unref(interface) };
+    }
+    let sid = sid?;
     let q = sid.query();
     if q.flags().contains(glib::SignalFlags::NO_HOOKS) {
         return None;
@@ -99,4 +113,54 @@ pub fn remove(l: ListenerId) {
             unsafe { glib::gobject_ffi::g_signal_remove_emission_hook(e.signal_id, e.hook_id) };
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glib::prelude::*;
+    use glib::subclass::prelude::*;
+    use std::sync::LazyLock;
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct ColdSignal;
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for ColdSignal {
+            const NAME: &'static str = "GtkMcpIssue31ColdSignal";
+            type Type = super::ColdSignal;
+            type ParentType = glib::Object;
+        }
+
+        impl ObjectImpl for ColdSignal {
+            fn signals() -> &'static [glib::subclass::Signal] {
+                static SIGNALS: LazyLock<Vec<glib::subclass::Signal>> =
+                    LazyLock::new(|| vec![glib::subclass::Signal::builder("cold-signal").build()]);
+                &SIGNALS
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct ColdSignal(ObjectSubclass<imp::ColdSignal>);
+    }
+
+    #[test]
+    fn hook_initializes_class_before_first_instance() {
+        let ty = ColdSignal::static_type();
+        assert!(glib::subclass::SignalId::lookup("cold-signal", ty).is_none());
+        let calls = Rc::new(Cell::new(0));
+        let seen = calls.clone();
+        let id = add(ty, "cold-signal", Rc::new(move |_, _| seen.set(seen.get() + 1)))
+            .expect("hook initializes the previously unused class");
+        let obj: ColdSignal = glib::Object::new();
+        obj.emit_by_name::<()>("cold-signal", &[]);
+        assert_eq!(calls.get(), 1);
+        remove(id);
+        obj.emit_by_name::<()>("cold-signal", &[]);
+        assert_eq!(calls.get(), 1, "removing the listener still removes its hook");
+    }
 }
