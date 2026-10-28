@@ -35,14 +35,30 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// List toolsets and their tools (R read-only, M mutating).
+    /// List registered app states, or read NAME as JSON.
+    State {
+        /// State name relative to app-state/ (see `gtk-mcp state`).
+        name: Option<String>,
+        /// App to read: session id, pid or app id.
+        #[arg(long)]
+        app: Option<String>,
+        /// Machine-readable list output (values are always JSON).
+        #[arg(long)]
+        json: bool,
+    },
+    /// List toolsets and their tools (R read-only, M mutating). With NAME, print that tool's
+    /// description and ARGS_JSON schema.
     Tools {
+        /// Tool to describe.
+        name: Option<String>,
         /// Machine-readable output.
         #[arg(long)]
         json: bool,
     },
     /// Run one tool and print its JSON result.
     Call(CallArgs),
+    /// Print a guide for AI agents driving gtk-mcp from the shell.
+    Prime,
 }
 
 #[derive(Args, Debug)]
@@ -104,13 +120,19 @@ async fn main() -> ExitCode {
         None => finish(serve(cli.serve).await),
         Some(Command::Serve(a)) => finish(serve(a).await),
         Some(Command::Doctor { json }) => doctor_cmd(json).await,
-        Some(Command::Apps { json }) => finish(apps_cmd(json).await),
-        Some(Command::Tools { json }) => {
+        Some(Command::Tools { name: None, json }) => {
             if json {
                 println!("{}", serde_json::to_string_pretty(&cli::tools_json()).unwrap_or_default());
             } else {
                 print!("{}", cli::tools_text());
             }
+            ExitCode::SUCCESS
+        }
+        Some(Command::Tools { name: Some(name), json }) => tool_cmd(&name, json),
+        Some(Command::Apps { json }) => finish(apps_cmd(json).await),
+        Some(Command::State { name, app, json }) => state_cmd(name.as_deref(), app.as_deref(), json).await,
+        Some(Command::Prime) => {
+            print!("{}", cli::prime_text());
             ExitCode::SUCCESS
         }
         Some(Command::Call(a)) => call_cmd(a).await,
@@ -192,9 +214,42 @@ async fn apps_cmd(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn tool_cmd(name: &str, json: bool) -> ExitCode {
+    let defs = match shell_broker(false, false).and_then(|b| Server::new(b).map_err(|e| anyhow::anyhow!(e))) {
+        Ok(server) => server.tools(),
+        Err(e) => return fail(&AgentError::invalid_params(e.to_string())),
+    };
+    let out = if json {
+        cli::tool_json(&defs, name).map(|v| format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()))
+    } else {
+        cli::tool_text(&defs, name)
+    };
+    match out {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e),
+    }
+}
+
 fn fail(e: &AgentError) -> ExitCode {
     eprintln!("{}", serde_json::to_string_pretty(e).unwrap_or_else(|_| e.message.clone()));
     ExitCode::FAILURE
+}
+
+async fn state_cmd(name: Option<&str>, app: Option<&str>, json: bool) -> ExitCode {
+    let broker = match shell_broker(false, false) {
+        Ok(b) => b,
+        Err(e) => return fail(&AgentError::invalid_params(e.to_string())),
+    };
+    match cli::state(&broker, name, app, json).await {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e),
+    }
 }
 
 async fn call_cmd(a: CallArgs) -> ExitCode {

@@ -75,7 +75,7 @@ Add the agent as an optional dependency behind a Cargo feature. Leave the featur
 gtk-mcp = ["dep:gtk-mcp-agent"]
 
 [dependencies]
-gtk-mcp-agent = { version = "0.1", optional = true }
+gtk-mcp-agent = { version = "0.2", optional = true }
 ```
 
 Then call `attach` once, on the main thread, after your application object exists. With Relm4, do it right after `RelmApp::new`:
@@ -91,7 +91,7 @@ Give widgets stable names where you can. After `entry.set_widget_name("server-ad
 
 Three more calls are optional:
 
-- `register_state("panels", ...)` takes a closure that returns your app state as JSON. The broker shows that state as a read-only MCP resource.
+- `register_state("panels", ...)` takes a closure that returns your app state as JSON. Read it with `gtk-mcp state panels` or as a read-only MCP resource.
 - `register_settings(&settings)` tells the GSettings tools which settings object your app uses.
 - `mark_secret(&widget)` keeps a widget's text out of every response. Password fields don't need it, because the agent spots them on its own.
 
@@ -116,11 +116,29 @@ The same binary has a few commands for the shell. With no command, `gtk-mcp` run
 ```sh
 gtk-mcp doctor                                   # checks the socket directory, every app socket and the AT-SPI bus
 gtk-mcp apps                                     # lists running apps: session, pid, app id, GTK version, state
+gtk-mcp state                                    # lists registered app states: session, app id, name
+gtk-mcp state panels --app org.example.App        # reads one registered state's JSON value
 gtk-mcp tools                                    # lists every tool by toolset, R for read-only and M for mutating
+gtk-mcp tools interact                           # one tool's description and the JSON schema of its arguments
 gtk-mcp call capture '{"target":"w1"}' -o a.png  # runs one tool and saves the picture
+gtk-mcp prime                                    # prints a usage guide for coding agents
 ```
 
-`doctor` only reads. It exits 1 when the socket directory is unusable or an app fails its handshake. `call` takes the tool name, the arguments as JSON (or `-` to read them from stdin) and `--app` with a session id, a pid or an app id. You can leave `--app` out when only one app runs. Results are printed as JSON, errors go to stderr and exit with 1. Every toolset is on for `call`. `--allow-launch` and `--allow-atspi` work as they do for the server. `--json` on `doctor`, `apps` and `tools` gives machine output.
+`doctor` only reads. It exits 1 when the socket directory is unusable or an app fails its handshake. `call` takes the tool name, the arguments as JSON (or `-` to read them from stdin) and `--app` with a session id, a pid or an app id. You can leave `--app` out when only one app runs. Results are printed as JSON, errors go to stderr and exit with 1. Progress updates go to stderr as `gtk-mcp: progress …`; stdout contains only the result. Every toolset is on for `call`. `--allow-launch` and `--allow-atspi` work as they do for the server. `--json` on `doctor`, `apps`, `tools` and `state` gives machine output.
+
+`state` lists the JSON states registered by running apps with `register_state`. With a name, it prints that state's value as pretty JSON. Names are relative to `app-state/`: a registration named `app-state/panels` is read with `gtk-mcp state panels`. `--app` accepts the same selectors as `call` and also filters the list. Without `--app`, a read selects the only app with that name; if several apps have it, the error lists candidates. An unknown name reports the available names.
+
+Each `call` opens its own connection to the app and closes it on exit. Refs such as `w12` stay valid between calls, but anything tied to the connection does not: temporary CSS, highlights and setting overrides are reverted, watches and recordings end, and snapshot and capture ids can't be diffed across calls. Put steps that need to share that state in one `batch`.
+
+### As an agent skill
+
+Coding agents that support skills can use the command line instead of the MCP server. Install the skill from `skills/gtk-mcp`:
+
+```sh
+npx skills add alex-oleshkevich/gtk-mcp
+```
+
+or copy `skills/gtk-mcp/SKILL.md` to your agent's skills directory, for example `~/.claude/skills/gtk-mcp/SKILL.md`. The skill tells the agent to run `gtk-mcp prime`, which prints the guide and the tool index from the installed binary, so it always matches your version.
 
 ## Security
 

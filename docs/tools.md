@@ -16,7 +16,7 @@ The broker flag `--toolsets` picks which groups of tools are offered. The defaul
 
 A target is either a ref (`w12`, `o4`) or a selector (see `plan.md` section 7). Actions are addressed as `{scope, name}`. Tools that change something accept `observe` and return the state after the change. If the change worked but reading the state back failed, you get both results, and nothing is retried.
 
-You can run any tool from the shell with `gtk-mcp call <tool> [ARGS_JSON]`. It uses the same code as the MCP server, with every toolset enabled, and prints the result as JSON. Use `gtk-mcp tools` to list the names, and `--app` to pick an app when several run. Apps started by `call launch_app` stop when the command exits.
+You can run any tool from the shell with `gtk-mcp call <tool> [ARGS_JSON]`. It uses the same code as the MCP server, with every toolset enabled, and prints the result as JSON; progress lines go to stderr as `gtk-mcp: progress …`. Use `gtk-mcp tools` to list the names, `gtk-mcp tools <tool>` for a tool's description and argument schema, and `--app` to pick an app when several run. `gtk-mcp state [NAME] [--app APP] [--json]` lists registered app states or reads one as JSON. Each `call` is its own connection: state that belongs to a connection (temporary CSS, highlights, setting overrides, watches, recordings, retained snapshot and capture ids) ends with the command, and apps started by `call launch_app` stop when it exits. Use `batch` for steps that must share it. `gtk-mcp prime` prints a usage guide for coding agents.
 
 ## core
 
@@ -130,7 +130,7 @@ Details:
 | `list_resources` | R | Registered GResource paths |
 | `read_resource` | R | Read one resource, size-limited |
 
-Besides tools, the app can share debug state as MCP resources. It registers them with `register_state` (`embedding.md`), for example `app-state/panels`.
+Besides tools, the app can share debug state with `register_state` (`embedding.md`), for example `app-state/panels`. Read it as the MCP resource `gtk-mcp://<session>/app-state/panels` or with `gtk-mcp state panels`; `gtk-mcp state` lists the available names and apps.
 
 Totals: 56 tools, 17 of them mutating (`batch` counts as mutating).
 

@@ -47,6 +47,11 @@ impl Server {
         Ok(Self { broker, tool_router: router })
     }
 
+    /// The MCP tool definitions this server lists: name, description, annotations, input schema.
+    pub fn tools(&self) -> Vec<rmcp::model::Tool> {
+        self.tool_router.list_all()
+    }
+
     async fn run<P: Serialize>(
         &self,
         name: &str,

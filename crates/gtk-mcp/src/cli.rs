@@ -1,10 +1,11 @@
-//! Shell-facing helpers behind `gtk-mcp apps|call|tools`. They go through the
+//! Shell-facing helpers behind `gtk-mcp apps|state|call|tools|prime`. They go through the
 //! same [`Broker`] code path as the MCP server.
 
-use crate::session::Session;
+use crate::session::{Progress, ProgressSink, Session};
 use crate::{Broker, ToolOutcome};
 use gtk_mcp_protocol::{AgentError, ErrorCode, SessionState, TOOLS, TOOLSETS, tool_spec};
 use serde_json::{Value, json};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -37,6 +38,50 @@ pub fn tools_text() -> String {
     let mutating = TOOLS.iter().filter(|t| t.mutating).count();
     o.push_str(&format!("\n{} tools, {mutating} mutating (M), {} read-only (R)\n", TOOLS.len(), TOOLS.len() - mutating));
     o
+}
+
+fn unknown_tool(tool: &str) -> AgentError {
+    let close = close_matches(tool);
+    let hint = if close.is_empty() {
+        "run `gtk-mcp tools` to list them".to_owned()
+    } else {
+        format!("did you mean: {}?", close.join(", "))
+    };
+    AgentError::invalid_params(format!("unknown tool '{tool}'; {hint}"))
+}
+
+/// `tools NAME`: the tool's MCP definition (what an MCP client sees in `tools/list`)
+/// plus its toolset and R/M flag.
+pub fn tool_json(defs: &[rmcp::model::Tool], name: &str) -> Result<Value, AgentError> {
+    let spec = tool_spec(name).ok_or_else(|| unknown_tool(name))?;
+    let def = defs
+        .iter()
+        .find(|t| t.name == name)
+        .ok_or_else(|| AgentError::new(ErrorCode::NotFound, format!("tool '{name}' has no MCP definition")))?;
+    Ok(json!({
+        "name": spec.name,
+        "toolset": spec.toolset,
+        "mutating": spec.mutating,
+        "description": def.description,
+        "input_schema": def.input_schema,
+    }))
+}
+
+pub fn tool_text(defs: &[rmcp::model::Tool], name: &str) -> Result<String, AgentError> {
+    let v = tool_json(defs, name)?;
+    let flag = if v["mutating"] == true { "M" } else { "R" };
+    Ok(format!(
+        "{} ({}, {flag})\n{}\n\nARGS_JSON schema:\n{}\n",
+        name,
+        v["toolset"].as_str().unwrap_or_default(),
+        v["description"].as_str().unwrap_or_default(),
+        serde_json::to_string_pretty(&v["input_schema"]).unwrap_or_default(),
+    ))
+}
+
+/// `prime`: the agent guide followed by the tool index.
+pub fn prime_text() -> String {
+    format!("{}\n## Tool index\n\n```text\n{}```\n", include_str!("prime.md").trim_end(), tools_text())
 }
 
 fn state_label(s: &SessionState) -> String {
@@ -100,6 +145,68 @@ pub fn resolve_app(sessions: &[Arc<Session>], app: &str) -> Result<Arc<Session>,
         0 => Err(AgentError::invalid_params(format!("no app matches '{app}'; apps: {}", describe(sessions)))),
         _ => Err(AgentError::invalid_params(format!("'{app}' matches several apps; use a session id or pid: {}", describe(&hits)))),
     }
+}
+
+/// List registered app-state resources or read one, using the same resource APIs as MCP.
+pub async fn state(broker: &Arc<Broker>, name: Option<&str>, app: Option<&str>, json: bool) -> Result<String, AgentError> {
+    let mut resources = broker.list_state_resources().await;
+    let sessions = broker.sessions();
+    if let Some(app) = app {
+        let session = resolve_app(&sessions, app)?;
+        resources.retain(|r| r.session == session.id());
+    }
+    if let Some(name) = name {
+        let matches: Vec<_> = resources.iter().filter(|r| r.name == name).collect();
+        let resource = match matches.as_slice() {
+            [resource] => resource,
+            [] => {
+                let mut names: Vec<_> = resources.iter().map(|r| r.name.as_str()).collect();
+                names.sort_unstable();
+                names.dedup();
+                return Err(AgentError::new(
+                    ErrorCode::NotFound,
+                    format!("unknown state '{name}'; available names: {}", if names.is_empty() { "none".into() } else { names.join(", ") }),
+                ));
+            }
+            _ => {
+                let candidates: Vec<_> = sessions.iter().filter(|s| matches.iter().any(|r| r.session == s.id())).cloned().collect();
+                return Err(AgentError::invalid_params(format!(
+                    "state '{name}' is registered by several apps; use --app with a session id, pid or app id: {}",
+                    describe(&candidates)
+                )));
+            }
+        };
+        let value = broker.read_state_resource(&resource.uri).await?;
+        return Ok(format!("{}\n", serde_json::to_string_pretty(&value).unwrap_or_default()));
+    }
+
+    #[derive(serde::Serialize)]
+    struct Listing {
+        session: String,
+        app: Option<String>,
+        name: String,
+    }
+    let rows: Vec<_> = resources
+        .into_iter()
+        .map(|r| Listing {
+            app: sessions.iter().find(|s| s.id() == r.session).and_then(|s| s.info().app_id),
+            session: r.session,
+            name: r.name,
+        })
+        .collect();
+    if json {
+        return Ok(format!("{}\n", serde_json::to_string_pretty(&rows).unwrap_or_default()));
+    }
+    if rows.is_empty() {
+        return Ok("no registered app states\n".into());
+    }
+    let session_width = rows.iter().map(|r| r.session.chars().count()).max().unwrap_or(0).max("SESSION".len());
+    let app_width = rows.iter().map(|r| r.app.as_deref().unwrap_or("-").chars().count()).max().unwrap_or(0).max("APP ID".len());
+    let mut text = format!("{:<session_width$}  {:<app_width$}  NAME\n", "SESSION", "APP ID");
+    for row in rows {
+        text.push_str(&format!("{:<session_width$}  {:<app_width$}  {}\n", row.session, row.app.as_deref().unwrap_or("-"), row.name));
+    }
+    Ok(text)
 }
 
 fn distance(a: &str, b: &str) -> usize {
@@ -176,13 +283,7 @@ pub async fn call(
     out: Option<&Path>,
 ) -> Result<CallOutput, AgentError> {
     if tool_spec(tool).is_none() {
-        let close = close_matches(tool);
-        let hint = if close.is_empty() {
-            "run `gtk-mcp tools` to list them".to_owned()
-        } else {
-            format!("did you mean: {}?", close.join(", "))
-        };
-        return Err(AgentError::invalid_params(format!("unknown tool '{tool}'; {hint}")));
+        return Err(unknown_tool(tool));
     }
     let mut args = match args.unwrap_or_else(|| json!({})) {
         Value::Null => json!({}),
@@ -197,7 +298,20 @@ pub async fn call(
             args["session"] = Value::String(s.id().to_owned());
         }
     }
-    let outcome = broker.call_tool(tool, args).await?;
+    let progress: ProgressSink = Arc::new(|p: Progress| {
+        let mut stderr = std::io::stderr().lock();
+        let _ = write!(stderr, "gtk-mcp: progress {}", p.progress);
+        if let Some(total) = p.total {
+            let _ = write!(stderr, "/{total}");
+        }
+        if let Some(message) = p.message {
+            for part in message.split(['\r', '\n']) {
+                let _ = write!(stderr, " {part}");
+            }
+        }
+        let _ = writeln!(stderr);
+    });
+    let outcome = broker.call_tool_with_progress(tool, args, Some(progress)).await?;
     let mut notes = Vec::new();
     if matches!(tool, "launch_app" | "restart_app") {
         notes.push("apps launched here stop when this command exits".to_owned());

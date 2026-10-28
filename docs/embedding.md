@@ -46,7 +46,7 @@ Cargo:
 gtk-mcp = ["dep:gtk-mcp-agent"]
 
 [dependencies]
-gtk-mcp-agent = { version = "0.1", optional = true }
+gtk-mcp-agent = { version = "0.2", optional = true }
 ```
 
 The agent uses the same gtk-rs major versions as your app (`gtk4 0.11`,

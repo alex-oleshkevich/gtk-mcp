@@ -1,9 +1,9 @@
-//! `gtk-mcp apps|call|tools|doctor` against mock agents (no display needed).
+//! `gtk-mcp apps|state|call|tools|doctor` against mock agents (no display needed).
 
 mod common;
 
 use base64::Engine;
-use common::MockAgent;
+use common::{MockAgent, Step};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -72,6 +72,131 @@ fn apps_with_none_running_says_so() {
     assert!(o.status.success());
     assert!(out(&o).contains("no instrumented apps"));
     assert_eq!(serde_json::from_str::<Value>(&out(&run(dir.path(), &["apps", "--json"]))).unwrap(), json!([]));
+}
+
+#[test]
+fn state_lists_registered_states_and_reads_pretty_json() {
+    let dir = private_dir();
+    let mock = MockAgent::builder(dir.path())
+        .respond("state/list", json!({"states": ["panels", "nested/status"]}))
+        .respond("state/read", json!({"value": {"open": true, "count": 3}}))
+        .start();
+    let o = run(dir.path(), &["state"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let table = out(&o);
+    assert!(table.lines().next().unwrap().contains("SESSION"), "{table}");
+    assert!(table.contains("APP ID") && table.contains("NAME"), "{table}");
+    assert!(table.contains("s1") && table.contains("org.example.Mock") && table.contains("panels") && table.contains("nested/status"), "{table}");
+
+    let o = run(dir.path(), &["state", "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(
+        serde_json::from_str::<Value>(&out(&o)).unwrap(),
+        json!([
+            {"session": "s1", "app": "org.example.Mock", "name": "panels"},
+            {"session": "s1", "app": "org.example.Mock", "name": "nested/status"}
+        ])
+    );
+
+    for args in [vec!["state", "panels"], vec!["state", "nested/status", "--json"]] {
+        let o = run(dir.path(), &args);
+        assert!(o.status.success(), "{}", err(&o));
+        assert_eq!(out(&o), "{\n  \"count\": 3,\n  \"open\": true\n}\n");
+        assert!(err(&o).is_empty(), "{}", err(&o));
+    }
+    let reads: Vec<_> = mock.requests().into_iter().filter(|r| r.1 == "state/read").collect();
+    assert_eq!(reads.len(), 2);
+    assert_eq!(reads[0].2["name"], "panels");
+    assert_eq!(reads[1].2["name"], "nested/status");
+}
+
+#[test]
+fn state_unknown_name_lists_available_names_as_an_agent_error() {
+    let dir = private_dir();
+    let _mock = MockAgent::builder(dir.path()).respond("state/list", json!({"states": ["panels", "status"]})).start();
+    let o = run(dir.path(), &["state", "missing"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(out(&o).is_empty());
+    let e: Value = serde_json::from_str(&err(&o)).expect("AgentError JSON on stderr");
+    assert_eq!(e["code"], "not_found");
+    let message = e["message"].as_str().unwrap();
+    assert!(message.contains("unknown state 'missing'") && message.contains("available names: panels, status"), "{message}");
+}
+
+#[test]
+fn state_with_no_registered_states_lists_none_and_rejects_reads() {
+    let dir = private_dir();
+    assert_eq!(out(&run(dir.path(), &["state"])), "no registered app states\n");
+    assert_eq!(serde_json::from_str::<Value>(&out(&run(dir.path(), &["state", "--json"]))).unwrap(), json!([]));
+    let o = run(dir.path(), &["state", "missing"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(err(&o).contains("available names: none"), "{}", err(&o));
+}
+
+#[test]
+fn state_app_selects_by_session_pid_and_app_id_and_filters_lists() {
+    let dir = private_dir();
+    let a = MockAgent::builder(dir.path())
+        .ack(|a| a.app_id = Some("org.example.A".into()))
+        .respond("state/list", json!({"states": ["shared", "only-a"]}))
+        .respond("state/read", json!({"value": "A"}))
+        .start();
+    let b = MockAgent::builder(dir.path())
+        .ack(|a| a.app_id = Some("org.example.B".into()))
+        .respond("state/list", json!({"states": ["shared"]}))
+        .respond("state/read", json!({"value": "B"}))
+        .start();
+    let session = if b.pid < a.pid { "s1" } else { "s2" };
+    for app in [session, &b.pid.to_string(), "org.example.B"] {
+        let o = run(dir.path(), &["state", "shared", "--app", app]);
+        assert!(o.status.success(), "{}", err(&o));
+        assert_eq!(serde_json::from_str::<Value>(&out(&o)).unwrap(), "B");
+    }
+    let o = run(dir.path(), &["state", "--app", "org.example.B", "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(serde_json::from_str::<Value>(&out(&o)).unwrap(), json!([{"session": session, "app": "org.example.B", "name": "shared"}]));
+
+    // Only apps with this name participate in automatic selection.
+    let o = run(dir.path(), &["state", "only-a"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(serde_json::from_str::<Value>(&out(&o)).unwrap(), "A");
+    let o = run(dir.path(), &["state", "only-a", "--app", "org.example.B"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(err(&o).contains("available names: shared"), "{}", err(&o));
+    let o = run(dir.path(), &["state", "--app", "nope"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(err(&o).contains("no app matches 'nope'"), "{}", err(&o));
+}
+
+#[test]
+fn state_with_several_matching_apps_lists_candidates() {
+    let dir = private_dir();
+    let a = MockAgent::builder(dir.path()).respond("state/list", json!({"states": ["shared"]})).start();
+    let b = MockAgent::builder(dir.path()).respond("state/list", json!({"states": ["shared"]})).start();
+    let o = run(dir.path(), &["state", "shared"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(out(&o).is_empty());
+    let e: Value = serde_json::from_str(&err(&o)).unwrap();
+    assert_eq!(e["code"], "invalid_params");
+    let message = e["message"].as_str().unwrap();
+    for candidate in ["--app", "s1", "s2", &a.pid.to_string(), &b.pid.to_string(), "org.example.Mock"] {
+        assert!(message.contains(candidate), "{message}");
+    }
+}
+
+#[test]
+fn call_progress_goes_to_stderr_and_stdout_stays_json() {
+    let dir = private_dir();
+    let _mock = MockAgent::builder(dir.path())
+        .script(
+            "wait_for",
+            vec![Step::Started, Step::Progress(3.0, Some(10.0)), Step::Progress(4.5, None), Step::Respond(json!({"satisfied": true}))],
+        )
+        .start();
+    let o = run(dir.path(), &["call", "wait_for", r#"{"target":"w1","condition":"text","contains":"ready"}"#]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(serde_json::from_str::<Value>(&out(&o)).unwrap(), json!({"satisfied": true}));
+    assert_eq!(err(&o), "gtk-mcp: progress 3/10 working\ngtk-mcp: progress 4.5 working\n");
 }
 
 #[test]
@@ -217,6 +342,24 @@ fn tools_lists_all_56_with_17_mutating() {
     assert_eq!(text.lines().filter(|l| l.starts_with("  M ")).count(), 17, "{text}");
     assert_eq!(text.lines().filter(|l| l.starts_with("  R ")).count(), 39, "{text}");
     assert!(text.contains("core (") && text.contains("  R list_apps") && text.contains("  M interact"), "{text}");
+}
+
+#[test]
+fn tools_name_prints_the_mcp_definition_and_rejects_unknown_names() {
+    let dir = private_dir();
+    let o = run(dir.path(), &["tools", "interact", "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let v: Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!((v["toolset"].as_str(), v["mutating"].as_bool()), (Some("core"), Some(true)), "{v}");
+    assert!(v["description"].as_str().is_some_and(|d| !d.is_empty()), "{v}");
+    // The schema is the one MCP clients get: it carries the flattened operation tag.
+    assert!(v["input_schema"].to_string().contains("\"set_expanded\""), "{v}");
+
+    let o = run(dir.path(), &["tools", "interac"]);
+    assert_eq!(o.status.code(), Some(1));
+    let e: Value = serde_json::from_str(&err(&o)).unwrap();
+    assert_eq!(e["code"], "invalid_params");
+    assert!(e["message"].as_str().unwrap().contains("did you mean: interact"), "{e}");
 }
 
 #[test]
