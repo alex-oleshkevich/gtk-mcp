@@ -47,11 +47,10 @@ impl A11yPreset {
     }
 }
 
-/// GTK presets of `launch_app`. Each maps to one environment variable of the
-/// child (inherited by the app's own children, `docs/plan.md` 4.5).
+/// Presets, each one environment variable of the child.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct LaunchPresets {
-    /// `GDK_DEBUG=no-portals`: in-process file chooser, no portal OpenURI.
+    /// `GDK_DEBUG=no-portals` (in-process file chooser).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_portals: Option<bool>,
     /// `GOBJECT_DEBUG=instance-count`: required by `object_stats`.
@@ -80,16 +79,15 @@ pub struct LaunchAppParams {
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Extra environment, passed through like any other variable. The broker
-    /// itself sets `GTK_MCP_DIR` to its socket directory.
+    /// Extra environment; the broker sets `GTK_MCP_DIR` to its socket directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presets: Option<LaunchPresets>,
-    /// `WAYLAND_DISPLAY` for the app; default: the broker's own.
+    /// `WAYLAND_DISPLAY`; default: the broker's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland_display: Option<String>,
-    /// `XDG_RUNTIME_DIR` for the app (where its Wayland socket lives); default: the broker's own.
+    /// `XDG_RUNTIME_DIR` (holds the Wayland socket); default: the broker's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub xdg_runtime_dir: Option<String>,
     /// Bound for the session socket to appear (default 15000 ms).

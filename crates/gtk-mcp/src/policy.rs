@@ -1,43 +1,23 @@
 //! Startup policy (`docs/plan.md` 4.5, 7.1) and runtime configuration.
 
-use gtk_mcp_protocol::{TOOLS, TOOLSETS, ToolSpec};
+use gtk_mcp_protocol::{TOOLS, ToolSpec};
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Policy {
-    /// Toolset names (`protocol::TOOLSETS`).
-    pub toolsets: Vec<String>,
-    /// When set, only these tools (which must belong to a selected toolset).
+    /// When set, only these tools.
     pub tools: Option<Vec<String>>,
     pub exclude_tools: Vec<String>,
     pub allow_launch: bool,
-    /// Enables the AT-SPI source (`a11y` toolset joins, AT-SPI events).
+    /// Enables the AT-SPI source (AT-SPI events, the `a11y` tools' data).
     pub allow_atspi: bool,
 }
 
-impl Default for Policy {
-    fn default() -> Self {
-        Self {
-            toolsets: vec!["core".into()],
-            tools: None,
-            exclude_tools: Vec::new(),
-            allow_launch: false,
-            allow_atspi: false,
-        }
-    }
-}
-
 impl Policy {
-    /// Tools exposed by this policy, in registry order. Unknown toolsets or
-    /// tool names (and `--tools` entries outside the selected toolsets) are
-    /// errors, so typos fail at startup instead of silently hiding tools.
+    /// Tools exposed by this policy, in registry order. Unknown tool names
+    /// are errors, so typos fail at startup instead of silently hiding tools.
     pub fn enabled_tools(&self) -> Result<Vec<&'static ToolSpec>, String> {
-        for ts in &self.toolsets {
-            if !TOOLSETS.contains(&ts.as_str()) {
-                return Err(format!("unknown toolset '{ts}' (valid: {})", TOOLSETS.join(", ")));
-            }
-        }
         let registered = |n: &str| TOOLS.iter().any(|t| t.name == n);
         let list = |names: &[String], flag: &str| -> Result<(), String> {
             for n in names {
@@ -54,17 +34,8 @@ impl Policy {
             list(t, "--tools")?;
         }
         list(&self.exclude_tools, "--exclude-tools")?;
-        let selected: Vec<&'static ToolSpec> =
-            TOOLS.iter().filter(|t| self.toolsets.iter().any(|s| s == t.toolset)).collect();
-        if let Some(only) = &self.tools {
-            for n in only {
-                if !selected.iter().any(|t| t.name == n) {
-                    return Err(format!("tool '{n}' in --tools is not in the selected toolsets ({})", self.toolsets.join(", ")));
-                }
-            }
-        }
-        Ok(selected
-            .into_iter()
+        Ok(TOOLS
+            .iter()
             .filter(|t| self.tools.as_ref().is_none_or(|only| only.iter().any(|n| n == t.name)))
             .filter(|t| !self.exclude_tools.iter().any(|n| n == t.name))
             .collect())

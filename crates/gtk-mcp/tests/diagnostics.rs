@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn diag_policy() -> Policy {
-    Policy { toolsets: vec!["core".into(), "diagnostics".into()], ..Policy::default() }
+    Policy::default()
 }
 
 fn setup(mock: impl FnOnce(&std::path::Path) -> MockAgent, ring: usize) -> (tempfile::TempDir, MockAgent, Arc<Broker>) {

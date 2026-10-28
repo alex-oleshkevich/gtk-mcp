@@ -21,7 +21,7 @@ fn by_id(id: &str) -> Value {
 }
 
 fn broker(fx: &Fixture) -> Arc<Broker> {
-    let policy = Policy { toolsets: vec!["core".into(), "layout-style".into()], ..Policy::default() };
+    let policy = Policy::default();
     Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap()
 }
 
@@ -608,7 +608,7 @@ async fn settings_are_inspected_and_overrides_revert_on_disconnect() {
     assert_eq!(s["libadwaita"]["style_manager"]["color-scheme"], sm["color-scheme"]);
 }
 
-// ---- mutation gate and toolset exposure ---------------------------------------------
+// ---- mutation gate ---------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutating_layout_style_tools_run_without_any_flag() {
@@ -630,12 +630,6 @@ async fn mutating_layout_style_tools_run_without_any_flag() {
     // Clearing the highlight removes its provider too; nothing temporary remains.
     c.json("highlight", json!({})).await;
     assert_eq!(c.json("inspect_style", json!({"target": by_id("m3-styled")})).await["temporary_css_providers"], 0);
-
-    // The layout-style tools only exist when the toolset is enabled.
-    let core_only = Broker::new(Policy::default(), Config::with_socket_dir(fx.dir.path())).unwrap();
-    let c3 = Client { broker: core_only };
-    let e = c3.err("inspect_layout", json!({"target": by_id("m3-styled")})).await;
-    assert_eq!(e.code, ErrorCode::InvalidParams);
 
     // Batch: read-only and mutating steps both run.
     let r = c

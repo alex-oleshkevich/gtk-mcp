@@ -341,7 +341,7 @@ fn spawn_app(display: &Display, a: &Artifacts, mut cmd: Command) -> Fixture {
 }
 
 async fn check_app(fx: &Fixture, lang: &str, token: &str) {
-    let policy = Policy { toolsets: vec!["core".into(), "actions".into(), "app".into()], ..Policy::default() };
+    let policy = Policy::default();
     let broker: std::sync::Arc<Broker> = Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap();
     let c = Client { broker: broker.clone() };
 

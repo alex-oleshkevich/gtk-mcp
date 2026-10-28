@@ -172,32 +172,30 @@ pub struct EditTextParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "condition", rename_all = "snake_case")]
 pub enum WaitCondition {
-    /// At least one live match exists.
     Exists,
     /// No live match exists (or the ref went stale).
     Absent,
-    /// Exactly `count` matches.
     MatchCount { count: usize },
     /// Property `name` equals `equals` (after the agent's value conversion).
     Property { name: String, equals: Value },
-    /// Text of the target equals / contains. Never satisfied by secret objects.
+    /// Text equals / contains; never satisfied by secret objects.
     Text {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         equals: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         contains: Option<String>,
     },
-    /// Target mapped state equals `mapped` (default true).
+    /// Mapped state equals `mapped` (default true).
     Mapped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mapped: Option<bool>,
     },
-    /// Target sensitive state equals `sensitive` (default true).
+    /// Sensitive state equals `sensitive` (default true).
     Sensitive {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sensitive: Option<bool>,
     },
-    /// `GApplication:is-busy` equals `busy` (default false). `target` is ignored.
+    /// `GApplication:is-busy` equals `busy` (default false); `target` is ignored.
     AppBusy {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         busy: Option<bool>,
@@ -286,7 +284,8 @@ pub struct ToolSpec {
 
 pub const TOOLSETS: &[&str] = &["core", "actions", "layout-style", "a11y", "diagnostics", "app"];
 
-/// Tools registered by this build; toolset and policy filtering happens in the broker.
+/// Tools registered by this build; `--tools` / `--exclude-tools` filtering happens in the broker.
+/// `toolset` only groups the `gtk-mcp tools` listing and the docs; it does not affect exposure.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec { name: "list_apps", toolset: "core", mutating: false, agent: false },
     ToolSpec { name: "list_windows", toolset: "core", mutating: false, agent: true },

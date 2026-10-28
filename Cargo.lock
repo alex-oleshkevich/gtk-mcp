@@ -881,7 +881,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-mcp"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-mcp-agent"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-mcp-agent-capi"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "gio",
  "glib",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-mcp-fixture"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "gtk-mcp-agent",
  "gtk4",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-mcp-protocol"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "schemars",
  "serde",

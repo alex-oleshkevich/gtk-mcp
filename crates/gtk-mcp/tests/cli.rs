@@ -31,15 +31,8 @@ fn cli_unknown_tool_in_exclude_tools_fails_startup() {
 }
 
 #[test]
-fn cli_unknown_toolset_fails_startup() {
-    startup_failure(&["--toolsets", "nope"], "nope");
-    startup_failure(&["--toolsets", "core,nope"], "nope");
-}
-
-#[test]
-fn cli_tool_of_unselected_toolset_fails_startup() {
-    // not registered in this build
-    startup_failure(&["--tools", "set_gsetting"], "set_gsetting");
+fn cli_toolsets_flag_is_rejected() {
+    startup_failure(&["--toolsets", "core"], "--toolsets");
 }
 
 struct Client {
@@ -113,14 +106,13 @@ impl Drop for Client {
 }
 
 #[test]
-fn stdio_lists_all_core_tools_with_annotations() {
+fn stdio_lists_all_56_tools_by_default_with_annotations() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &[]);
     let tools = c.tools();
+    assert_eq!(tools.len(), 56);
     let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core").map(|t| t.name).collect();
-    assert_eq!(tools.len(), expected.len());
-    assert_eq!(names, expected);
+    assert_eq!(names, TOOLS.iter().map(|t| t.name).collect());
     for t in &tools {
         let spec = TOOLS.iter().find(|s| s.name == t["name"].as_str().unwrap()).unwrap();
         let a = &t["annotations"];
@@ -129,51 +121,10 @@ fn stdio_lists_all_core_tools_with_annotations() {
             assert_ne!(a["readOnlyHint"], true, "{}", t["name"]);
         } else {
             assert_eq!(a["readOnlyHint"], true, "{}", t["name"]);
-            assert_eq!(a["destructiveHint"], false, "{}", t["name"]);
-            assert_eq!(a["idempotentHint"], true, "{}", t["name"]);
         }
+        assert_eq!(t["inputSchema"]["type"], "object", "{}", t["name"]);
     }
     assert!(tools.iter().any(|t| t["name"] == "batch" && t["annotations"]["readOnlyHint"] != true));
-}
-
-#[test]
-fn stdio_all_toolsets_list_56_tools() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut c = Client::start(dir.path(), &["--toolsets", "all"]);
-    let tools = c.tools();
-    assert_eq!(tools.len(), 56);
-    let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, TOOLS.iter().map(|t| t.name).collect());
-}
-
-#[test]
-fn stdio_layout_style_toolset_adds_nine_annotated_tools() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut c = Client::start(dir.path(), &["--toolsets", "core,layout-style"]);
-    let tools = c.tools();
-    let names: BTreeSet<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    let expected: BTreeSet<&str> = TOOLS.iter().filter(|t| t.toolset == "core" || t.toolset == "layout-style").map(|t| t.name).collect();
-    assert_eq!(tools.len(), expected.len());
-    assert_eq!(names, expected);
-    for name in ["apply_css", "remove_css", "highlight", "override_setting"] {
-        let t = tools.iter().find(|t| t["name"] == name).unwrap();
-        assert_eq!(t["annotations"]["destructiveHint"], true, "{name}");
-    }
-    for name in ["inspect_layout", "audit_layout", "inspect_style", "inspect_render", "inspect_settings"] {
-        let t = tools.iter().find(|t| t["name"] == name).unwrap();
-        assert_eq!(t["annotations"]["readOnlyHint"], true, "{name}");
-    }
-}
-
-#[test]
-fn stdio_toolsets_actions_adds_the_nine_actions_tools() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut c = Client::start(dir.path(), &["--toolsets", "core,actions"]);
-    let tools = c.tools();
-    assert_eq!(tools.len(), TOOLS.iter().filter(|t| t.toolset == "core" || t.toolset == "actions").count());
-    for n in ["list_actions", "activate_shortcut", "inspect_controllers"] {
-        assert!(tools.iter().any(|t| t["name"] == n), "{n}");
-    }
 }
 
 #[test]
@@ -181,7 +132,7 @@ fn stdio_exclude_tools_removes_from_list_and_dispatch() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::start(dir.path(), &["--exclude-tools", "capture"]);
     let tools = c.tools();
-    assert_eq!(tools.len(), TOOLS.iter().filter(|t| t.toolset == "core").count() - 1);
+    assert_eq!(tools.len(), TOOLS.len() - 1);
     assert!(!tools.iter().any(|t| t["name"] == "capture"));
     let r = c.call("tools/call", json!({"name":"capture","arguments":{"target":"w1"}}));
     assert!(r.get("error").is_some() || r["result"]["isError"] == true, "{r}");

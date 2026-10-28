@@ -12,6 +12,7 @@ pub mod launch;
 pub mod lifecycle;
 pub mod policy;
 pub mod ring;
+mod schema;
 pub mod server;
 pub mod session;
 

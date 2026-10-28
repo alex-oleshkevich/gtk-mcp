@@ -23,7 +23,7 @@ fn by_id(id: &str) -> Value {
 }
 
 fn policy() -> Policy {
-    Policy { toolsets: vec!["core".into(), "diagnostics".into()], allow_launch: true, ..Policy::default() }
+    Policy { allow_launch: true, ..Policy::default() }
 }
 
 fn client(fx: &Fixture) -> (Client, Arc<Broker>) {
@@ -407,7 +407,7 @@ async fn record_real_input_becomes_a_batch_that_replays_in_a_new_session() {
 async fn controller_of_an_entry_that_became_secret_is_secret() {
     let display = require_display!();
     let fx = Fixture::start(&display, &[]);
-    let policy = Policy { toolsets: vec!["core".into(), "actions".into(), "diagnostics".into()], ..Policy::default() };
+    let policy = Policy::default();
     let c = Client { broker: Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap() };
     let q = c.json("query", json!({"selector": {"type_name": "GtkText", "ancestor": by_id("name-entry")}})).await;
     let text = q["matches"][0]["ref"].as_str().unwrap_or_else(|| panic!("{q}")).to_owned();

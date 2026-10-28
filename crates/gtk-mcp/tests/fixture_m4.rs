@@ -1,5 +1,5 @@
 //! M4 acceptance: AC-11 (launch, post-mortem, refusals, env rejection) plus the
-//! app toolset, `object_stats` and `register_state` resources, against the real
+//! `object_stats` and `register_state` resources, against the real
 //! fixture through the real broker. Every wait is bounded; the harness watchdog
 //! turns any hang into a diagnosable failure.
 
@@ -87,7 +87,7 @@ impl Assets {
 
 /// Broker with launch enabled, socket dir = `dir`.
 fn launcher(dir: &Path, allow_launch: bool) -> (Client, Arc<Broker>) {
-    let policy = Policy { toolsets: vec!["core".into(), "app".into(), "diagnostics".into()], allow_launch, ..Policy::default() };
+    let policy = Policy { allow_launch, ..Policy::default() };
     let broker = Broker::new(policy, Config::with_socket_dir(dir)).unwrap();
     (Client { broker: broker.clone() }, broker)
 }
@@ -452,7 +452,7 @@ async fn lifecycle_restart_yields_a_new_session_and_the_old_one_is_exited() {
 // ---- app_open ----------------------------------------------------------------
 
 fn app_broker(fx: &Fixture) -> (Client, Arc<Broker>) {
-    let policy = Policy { toolsets: vec!["core".into(), "app".into(), "diagnostics".into()], ..Policy::default() };
+    let policy = Policy::default();
     let b = Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap();
     (Client { broker: b.clone() }, b)
 }
@@ -752,10 +752,6 @@ async fn register_state_is_an_mcp_resource_and_reregistration_replaces_it() {
     assert_eq!(b.read_state_resource("file:///etc/passwd").await.unwrap_err().code, ErrorCode::InvalidParams);
     assert_eq!(b.read_state_resource("gtk-mcp://s1/other/x").await.unwrap_err().code, ErrorCode::InvalidParams);
 
-    // state resources belong to the `app` toolset: absent with the default policy
-    let core_only = fx.broker();
-    assert!(core_only.list_state_resources().await.is_empty());
-    assert_eq!(core_only.read_state_resource("gtk-mcp://s1/app-state/fixture").await.unwrap_err().code, ErrorCode::NotFound);
 }
 
 struct Stdio3 {
@@ -787,7 +783,7 @@ impl Stdio3 {
         });
         let mut c = Stdio3 { child, stdin, rx, next: 1 };
         let init = c.call("initialize", json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0"}}));
-        assert!(init["result"]["capabilities"].get("resources").is_some() == args.contains(&"core,app"), "{init}");
+        assert!(init["result"]["capabilities"].get("resources").is_some(), "{init}");
         writeln!(c.stdin, "{}", json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();
         c
     }
@@ -819,7 +815,7 @@ async fn register_state_over_mcp_stdio_resources_list_and_read() {
     let fx = Fixture::start(&display, &[]);
     let dir = fx.dir.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let mut c = Stdio3::start(&dir, &["--toolsets", "core,app"]);
+        let mut c = Stdio3::start(&dir, &[]);
         let r = c.call("resources/list", json!({}));
         let res = r["result"]["resources"].as_array().unwrap_or_else(|| panic!("{r}"));
         assert_eq!(res.len(), 1, "{r}");
@@ -831,20 +827,14 @@ async fn register_state_over_mcp_stdio_resources_list_and_read() {
         assert_eq!(v["version"], 1);
         let r = c.call("resources/read", json!({"uri": "gtk-mcp://s1/app-state/missing"}));
         assert!(r.get("error").is_some(), "{r}");
-        // the app tools are listed with the toolset
+        // every tool is listed
         let tools = c.call("tools/list", json!({}));
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         for t in ["launch_app", "restart_app", "stop_app", "app_open", "inspect_gsettings", "set_gsetting", "list_resources", "read_resource"] {
             assert!(names.contains(&t), "{t} missing from {names:?}");
         }
-        assert!(!names.contains(&"object_stats"), "object_stats is in the diagnostics toolset");
-        drop(c);
-        // default toolsets: no resources capability, no app tools
-        let mut c = Stdio3::start(&dir, &[]);
-        let tools = c.call("tools/list", json!({}));
-        assert!(!tools["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "set_gsetting"));
-        let r = c.call("resources/list", json!({}));
-        assert!(r.get("error").is_some() || r["result"]["resources"].as_array().is_none_or(Vec::is_empty), "{r}");
+        assert!(names.contains(&"object_stats"), "object_stats missing from {names:?}");
+        assert_eq!(names.len(), 56);
     })
     .await
     .unwrap();

@@ -218,7 +218,7 @@ async fn dispatch_excluded_tool_is_absent_from_dispatch() {
     let policy = Policy { exclude_tools: vec!["capture".into()], ..Policy::default() };
     let b = broker_with(dir.path(), policy, |_| {});
     assert!(!b.enabled_tools().iter().any(|t| t.name == "capture"));
-    assert_eq!(b.enabled_tools().len(), gtk_mcp_protocol::TOOLS.iter().filter(|t| t.toolset == "core").count() - 1);
+    assert_eq!(b.enabled_tools().len(), gtk_mcp_protocol::TOOLS.len() - 1);
     let e = b.call_tool("capture", json!({"session":"s1","target":"w1"})).await.unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidParams);
     assert!(mock.requests().is_empty());

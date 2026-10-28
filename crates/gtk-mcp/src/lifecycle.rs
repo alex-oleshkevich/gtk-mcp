@@ -152,17 +152,9 @@ impl Broker {
 
     // ---- app-state resources ----------------------------------------------
 
-    /// Whether `app-state/<name>` resources are exposed: they belong to the `app` toolset.
-    pub fn resources_enabled(&self) -> bool {
-        self.policy.toolsets.iter().any(|t| t == "app")
-    }
-
     /// `register_state` entries of every running session. Sessions that do not
     /// answer within 3 s are skipped.
     pub async fn list_state_resources(self: &Arc<Self>) -> Vec<StateResource> {
-        if !self.resources_enabled() {
-            return Vec::new();
-        }
         self.rescan().await;
         let mut out = Vec::new();
         for s in self.sessions() {
@@ -183,9 +175,6 @@ impl Broker {
 
     /// Read one `gtk-mcp://<session>/app-state/<name>` resource; returns the registered closure's JSON value.
     pub async fn read_state_resource(self: &Arc<Self>, uri: &str) -> Result<Value, AgentError> {
-        if !self.resources_enabled() {
-            return Err(AgentError::new(ErrorCode::NotFound, "app-state resources need the `app` toolset (--toolsets core,app)"));
-        }
         let rest = uri
             .strip_prefix(RESOURCE_SCHEME)
             .ok_or_else(|| AgentError::invalid_params(format!("unknown resource '{uri}': expected {RESOURCE_SCHEME}<session>/{STATE_PREFIX}<name>")))?;

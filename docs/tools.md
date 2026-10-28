@@ -7,16 +7,16 @@ gtk-mcp works inside the app's process. It covers GTK, GDK, GSK, GIO application
 Each tool is marked `R` or `M`:
 
 - `R` tools only read.
-- `M` tools change something. They run whenever their toolset is turned on. The only gate is whether the app compiled the agent in (see `embedding.md`).
+- `M` tools change something. They run whenever the tool is listed. The only gate is whether the app compiled the agent in (see `embedding.md`).
 - The lifecycle tools (`launch_app`, `restart_app`, `stop_app`) also need the broker flag `--allow-launch`.
 
 The MCP tool annotations follow the same split.
 
-The broker flag `--toolsets` picks which groups of tools are offered. The default is `core`; `all` selects every toolset. `--tools` and `--exclude-tools` add or remove single tools. An unknown name stops the broker from starting.
+The broker lists every tool. The groups below are for reading only. `--tools` offers just the named tools and `--exclude-tools` hides single tools. An unknown name stops the broker from starting.
 
 A target is either a ref (`w12`, `o4`) or a selector (see `plan.md` section 7). Actions are addressed as `{scope, name}`. Tools that change something accept `observe` and return the state after the change. If the change worked but reading the state back failed, you get both results, and nothing is retried.
 
-You can run any tool from the shell with `gtk-mcp call <tool> [ARGS_JSON]`. It uses the same code as the MCP server, with every toolset enabled, and prints the result as JSON; progress lines go to stderr as `gtk-mcp: progress …`. Use `gtk-mcp tools` to list the names, `gtk-mcp tools <tool>` for a tool's description and argument schema, and `--app` to pick an app when several run. `gtk-mcp state [NAME] [--app APP] [--json]` lists registered app states or reads one as JSON. Each `call` is its own connection: state that belongs to a connection (temporary CSS, highlights, setting overrides, watches, recordings, retained snapshot and capture ids) ends with the command, and apps started by `call launch_app` stop when it exits. Use `batch` for steps that must share it. `gtk-mcp prime` prints a usage guide for coding agents.
+You can run any tool from the shell with `gtk-mcp call <tool> [ARGS_JSON]`. It uses the same code as the MCP server, with every tool enabled, and prints the result as JSON; progress lines go to stderr as `gtk-mcp: progress …`. Use `gtk-mcp tools` to list the names, `gtk-mcp tools <tool>` for a tool's description and argument schema, and `--app` to pick an app when several run. `gtk-mcp state [NAME] [--app APP] [--json]` lists registered app states or reads one as JSON. Each `call` is its own connection: state that belongs to a connection (temporary CSS, highlights, setting overrides, watches, recordings, retained snapshot and capture ids) ends with the command, and apps started by `call launch_app` stop when it exits. Use `batch` for steps that must share it. `gtk-mcp prime` prints a usage guide for coding agents.
 
 ## core
 

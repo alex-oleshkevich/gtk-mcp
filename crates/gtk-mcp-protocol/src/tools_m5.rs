@@ -23,17 +23,16 @@ pub const HUMAN_WINDOW_MS: u64 = 300;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WatchKind {
-    /// `notify::<property>`; `properties` omitted: every property of the target.
+    /// `properties` omitted: every property.
     Notify {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         properties: Option<Vec<String>>,
     },
-    /// A hookable signal of the target (see `list_signals`, `watch.eligible`).
+    /// See `list_signals`, `watch.eligible`.
     Signal { signal: String },
-    /// `items-changed` of a list model and `selection-changed` of a selection
-    /// model. The target is a model, or a widget with a `model` property.
+    /// Target is a list or selection model, or a widget with a `model` property.
     Model,
-    /// App-wide AT-SPI events (broker-side; requires `--allow-atspi`).
+    /// App-wide, broker-side; needs `--allow-atspi`.
     Atspi {
         /// Event-name prefixes; omitted or empty: focus, state, name and window events.
         #[serde(default, skip_serializing_if = "Option::is_none")]

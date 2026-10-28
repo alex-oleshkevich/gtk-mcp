@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use gtk_mcp::{Broker, Config, Policy, cli, doctor, server::Server};
-use gtk_mcp_protocol::{AgentError, TOOLSETS};
+use gtk_mcp_protocol::AgentError;
 use rmcp::{ServiceExt, transport::stdio};
 use serde_json::Value;
 use std::io::Read;
@@ -46,7 +46,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// List toolsets and their tools (R read-only, M mutating). With NAME, print that tool's
+    /// List tools grouped by area (R read-only, M mutating). With NAME, print that tool's
     /// description and ARGS_JSON schema.
     Tools {
         /// Tool to describe.
@@ -83,10 +83,7 @@ struct CallArgs {
 
 #[derive(Args, Debug)]
 struct ServeArgs {
-    /// Comma-separated toolsets to expose; `all` selects every toolset.
-    #[arg(long, value_delimiter = ',', default_value = "core")]
-    toolsets: Vec<String>,
-    /// Comma-separated exact tool names; restricts the selected toolsets to these.
+    /// Comma-separated exact tool names to expose; all other tools are hidden.
     #[arg(long, value_delimiter = ',')]
     tools: Option<Vec<String>>,
     /// Comma-separated exact tool names to hide.
@@ -111,15 +108,6 @@ struct ServeArgs {
 
 fn names(v: Vec<String>) -> Vec<String> {
     v.into_iter().filter(|s| !s.is_empty()).collect()
-}
-
-/// `names`, with `all` expanded to every toolset (`protocol::TOOLSETS`).
-fn toolsets(v: Vec<String>) -> Vec<String> {
-    let v = names(v);
-    if v.iter().any(|s| s == "all") {
-        return TOOLSETS.iter().map(|s| (*s).to_owned()).collect();
-    }
-    v
 }
 
 #[tokio::main]
@@ -160,7 +148,6 @@ fn finish(r: anyhow::Result<()>) -> ExitCode {
 
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     let policy = Policy {
-        toolsets: toolsets(a.toolsets),
         tools: a.tools.map(names),
         exclude_tools: names(a.exclude_tools),
         allow_launch: a.allow_launch,
@@ -187,10 +174,9 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A broker with every toolset enabled, for the shell commands.
+/// A broker for the shell commands.
 fn shell_broker(allow_launch: bool, allow_atspi: bool) -> anyhow::Result<Arc<Broker>> {
     let policy = Policy {
-        toolsets: TOOLSETS.iter().map(|s| (*s).to_owned()).collect(),
         allow_launch,
         allow_atspi,
         ..Policy::default()

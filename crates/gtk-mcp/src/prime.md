@@ -13,7 +13,7 @@ nothing, run `gtk-mcp doctor`. Both sides must agree on `GTK_MCP_DIR` when it is
 ```sh
 gtk-mcp apps                         # running apps: session, pid, app id, GTK version, state
 gtk-mcp state [NAME] [--app APP] [--json] # list registered app states, or read NAME as JSON
-gtk-mcp tools                        # every tool by toolset; R reads, M changes something
+gtk-mcp tools                        # every tool by group; R reads, M changes something
 gtk-mcp tools NAME                   # one tool: description and ARGS_JSON schema (--json for JSON)
 gtk-mcp call TOOL ['ARGS_JSON'] [--app APP] [-o FILE.png]
 echo 'ARGS_JSON' | gtk-mcp call TOOL - # arguments from stdin; use this for long or quoted JSON

@@ -24,8 +24,8 @@ flowchart LR
   checks each peer's user id with `SO_PEERCRED` and turns away other users.
   A second copy of a `GApplication` that only forwards to the first one
   never gets `startup`, so it never opens a socket.
-- Tools that change things run whenever the agent is attached and their
-  toolset is turned on in the broker. The handshake only reports versions
+- Tools that change things run whenever the agent is attached and the
+  tool is listed by the broker. The handshake only reports versions
   and capabilities.
 - The only environment variable the agent reads is `GTK_MCP_DIR` (the socket
   location). It doesn't remove anything from the process environment. GTK
@@ -168,11 +168,7 @@ Registering the same name again replaces the old closure. This is also how
 to share session-lock state, since gtk4-session-lock has no getters the agent
 could call.
 
-MCP clients only see these resources when the broker's `app` toolset is on.
-Start the broker with `--toolsets core,app` (the default is just `core`).
-Without it, the broker doesn't offer resources at all, and `resources/list`
-returns an empty list even if the app registered state. With the toolset on,
-each entry becomes the MCP resource `gtk-mcp://<session>/app-state/<name>`
+The broker always offers these resources. Each entry becomes the MCP resource `gtk-mcp://<session>/app-state/<name>`
 (JSON, for example `gtk-mcp://s1/app-state/panels`), which you read with
 `resources/read`.
 

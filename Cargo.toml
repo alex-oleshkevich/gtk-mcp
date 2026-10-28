@@ -17,7 +17,7 @@ default-members = [
 exclude = ["spikes"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/alex-oleshkevich/gtk-mcp"
@@ -37,5 +37,5 @@ gtk4 = { version = "0.11", features = ["v4_10"] }
 glib = "0.22"
 gio = "0.22"
 async-channel = "2.5"
-gtk-mcp-protocol = { path = "crates/gtk-mcp-protocol", version = "0.2.1" }
-gtk-mcp-agent = { path = "crates/gtk-mcp-agent", version = "0.2.1" }
+gtk-mcp-protocol = { path = "crates/gtk-mcp-protocol", version = "0.3.0" }
+gtk-mcp-agent = { path = "crates/gtk-mcp-agent", version = "0.3.0" }

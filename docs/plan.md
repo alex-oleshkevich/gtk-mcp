@@ -104,7 +104,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| `gtk-mcp` (broker) | MCP over stdio; session discovery and handshake; policy (launch, AT-SPI); toolset filtering; snapshot/capture retention; event/log/post-mortem buffers; process lifecycle for apps it launched; AT-SPI client; PNG diffing |
+| `gtk-mcp` (broker) | MCP over stdio; session discovery and handshake; policy (launch, AT-SPI); `--tools` / `--exclude-tools` filtering; snapshot/capture retention; event/log/post-mortem buffers; process lifecycle for apps it launched; AT-SPI client; PNG diffing |
 | `gtk-mcp-agent` | Embedded; owns the object registry, all GTK access, adapters, redaction, settle, batch execution, record |
 | `gtk-mcp-protocol` | Shared serde types (section 7); the only contract between the two |
 | `gtk-mcp-agent-capi` | `cdylib` + header + GIR typelib for C / Python / GJS hosts |
@@ -186,10 +186,10 @@ enforced where values are serialized.
 | Gate | Default | Set by |
 |---|---|---|
 | Agent active | off (compile time) | the developer's `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or feature alone) mark at the `attach` call site; calling `attach` activates unconditionally |
-| Mutations | n/a | no gate: mutating tools run when their toolset is enabled; the handshake reports versions and capabilities only |
+| Mutations | n/a | no gate: mutating tools run whenever they are listed; the handshake reports versions and capabilities only |
 | Lifecycle (`launch_app`, `restart_app`, `stop_app`) | off | broker `--allow-launch` |
 | AT-SPI source | off | broker `--allow-atspi` |
-| Toolsets | `core` | broker `--toolsets core,actions,...` (`all` = every toolset); `--tools` / `--exclude-tools` refine |
+| Tool exposure | all tools | broker `--tools` (only these) / `--exclude-tools` (hide these); toolsets were removed (§13) |
 
 - `launch_app` passes the caller's environment variables through like any
   others. The only one it sets is `GTK_MCP_DIR` (its socket directory).
@@ -221,7 +221,7 @@ sequenceDiagram
 
 ### 5.2 Request
 
-1. The broker checks the params, policy and toolset, then sends the request
+1. The broker checks the params and policy, then sends the request
    with `deadline_ms`.
 2. The agent socket thread puts it in the queue.
 3. The executor takes it off the queue (`started`).
@@ -521,7 +521,7 @@ form"). This section doesn't change it.
 |---|---|---|
 | `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or feature alone) | app source | the only activation gate: compiled-in `attach` activates unconditionally; removing `debug_assertions` enables it in release |
 | `GTK_MCP_DIR` | app env and broker | socket directory override (location only, not a gate); default `$XDG_RUNTIME_DIR/gtk-mcp` |
-| `--toolsets`, `--tools`, `--exclude-tools` | broker | tool exposure; unknown names fail startup |
+| `--tools`, `--exclude-tools` | broker | tool exposure; unknown names fail startup |
 | `--allow-launch`, `--allow-atspi` | broker | policy gates |
 | `--retain-snapshots N` (16), `--retain-captures N` (16), `--retain-exited N` (8) | broker | bounded retention |
 
@@ -689,7 +689,7 @@ Spikes, each done before the milestone that needs its answer:
 9. ~~Logs?~~ Broker stderr capture + opt-in `forward_log`.
 10. ~~Clipboard?~~ Struck; `wayland-mcp`.
 11. ~~Selector collisions across glimpse panels?~~ `WindowSel::Monitor` and `nth`.
-12. ~~Toolset exposure?~~ Broker `--toolsets`, default `core`.
+12. ~~Toolset exposure?~~ Superseded: `--toolsets` was removed; every tool is listed and `--tools` / `--exclude-tools` refine (§13).
 13. ~~Wire framing and images?~~ NDJSON JSON-RPC 2.0, base64 PNG, 32 MiB frame cap.
 14. ~~Version skew?~~ `PROTOCOL_VERSION` in handshake; mismatch → `Incompatible` session.
 
@@ -716,7 +716,7 @@ reviewed `tools.md`, `widget-tree.md` and `embedding.md`.
 | M11 `inspect_model` vs exclusion | adapter-only mapping |
 | M12 C/GI init panic; libadwaita linking | 4.2, 6 |
 | M13 restart of external apps | broker-launched only |
-| M14 toolset mechanism | 4.5, 7.1 |
+| M14 toolset mechanism | 4.5, 7.1; removed (§13) |
 | M15 detached vs stale | 4.3 |
 | S2: settle timeout and rule | `settle_timeout_ms` default raised 1000 → 2000 (throttled frames ~0.98 s apart). A clean widget is not re-drawn: GTK's last render node is already settled, so `stale` is false without waiting; with pending changes the next `after-paint` is awaited; none in time → last frame with `stale:true, stale_reason:"no_frame"` (`"settle_disabled"` when `settle:false`); never painted → `capture_unavailable`. Unmapped targets fail `target_unmapped` first. Known gap: a CSS restyle deferred to the next frame can be missed for a clean widget |
 | Spec correction: capture bounds/background | The PNG covers `compute_bounds(w, w)` (CSS margin box, may exceed `width()×height()`); it is flattened onto the theme window background rather than transparent. Tests use `result.width/height` |
@@ -731,6 +731,7 @@ reviewed `tools.md`, `widget-tree.md` and `embedding.md`.
 | M5/M6 watch integration | `watch {kind: "atspi", events?: [prefix, ...]}` is app-wide (omit `target`) and calls `Broker::watch_atspi`; it requires `--allow-atspi`. The session has one AT-SPI subscription, id `"atspi"`, replaced by another AT-SPI watch. Records include that subscription id and work with `read_events` filters; `unwatch` calls `Broker::unwatch_atspi`, including for an exited session. `a11y_focus_event_carries_the_joined_ref` exercises watch/read_events/unwatch through the broker tool entry point. |
 | Minors (full-view wording, accessible_id, socket path/bind time, class-action enabled, ellipsis scope, highlight class, focus walk side effects, diff ids, action refs, no-portals scope, instance count availability, example, glimpse-lock type, visibility scope, shortcut scopes) | applied across `tools.md`, `widget-tree.md`, `embedding.md`, and sections 4 to 7 and 11 |
 | Spec correction: compile-time gate only | The runtime env/flag gates are removed: no app-env activation variable, no app-env mutation variable, no broker mutation flag, no mutation flag in the handshake, no env scrubbing, and `launch_app` no longer rejects or sets agent env variables (it sets only `GTK_MCP_DIR`, the socket location). The only gate is `#[cfg(all(debug_assertions, feature = "gtk-mcp"))]` (or the feature alone) at the `attach` call site; removing `debug_assertions` enables the agent in release. `MutationsDisabled` stays in the error enum for wire compatibility but is never emitted for a gate. Sections 4.5, 5.1, 7, 7.1, 9 (AC-1/4/9/11/15) and 12 updated accordingly |
+| Toolsets removed | `--toolsets` and the default-`core` exposure are gone (supersedes 4.5, Q12, M14): the broker lists all 56 tools; `app-state` resources are always offered. Clients (Claude Code, Codex, ...) defer tool definitions and find tools by tool search over name and description, so the context cost of a full list is low. `--tools` and `--exclude-tools` remain. `ToolSpec.toolset` / `TOOLSETS` only group `gtk-mcp tools` output and the docs. Input schemas are slimmed once at startup (no `$schema`/`title`/numeric `format`, optional keys without `null`, single-use `$defs` inlined, flat optional key lists and tagged variants folded into descriptions); arguments are still validated by serde. Read-only tools carry only `readOnlyHint`. |
 
 Self-consistency check of this plan: every type named in the text appears in
 section 7, and every enum variant in section 7 is used by a flow, tool or AC.

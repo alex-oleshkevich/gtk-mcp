@@ -14,9 +14,9 @@ There are two parts. The broker is the MCP server: your MCP client starts it and
 
 ## What it can do
 
-The broker has 56 tools in six groups, called toolsets: `core`, `actions`, `layout-style`, `diagnostics`, `a11y` and `app`. You pick which toolsets to turn on when you start the broker.
+The broker has 56 tools in six groups: core, actions, layout-style, diagnostics, a11y and app. It always lists all of them. Clients such as Claude Code and Codex defer tool definitions and load a tool's schema only when the agent searches for it, so the full list costs little context. To offer fewer tools, start the broker with `--tools` (only these) or `--exclude-tools` (hide these).
 
-`core` is the basic set. With it, the agent can:
+The core tools are the basic set. With them, the agent can:
 
 - list the apps and windows it can see;
 - print the widget tree as text or JSON;
@@ -27,7 +27,7 @@ The broker has 56 tools in six groups, called toolsets: `core`, `actions`, `layo
 
 Every tool that changes something also reads the result back. If a slider clamps your value or an entry rejects your text, the agent sees that instead of a false success.
 
-The other toolsets:
+The other groups:
 
 - `actions`: the app's actions (GAction), menus and keyboard shortcuts.
 - `layout-style`: widget sizes, labels cut off with "…", children that spill out of their parent, and temporary CSS. You can try a style and see its errors without rebuilding.
@@ -60,7 +60,7 @@ The binary is then `target/release/gtk-mcp`. Either way, add it to your MCP clie
   "mcpServers": {
     "gtk-mcp": {
       "command": "/path/to/gtk-mcp",
-      "args": ["--toolsets", "core,app"]
+      "args": []
     }
   }
 }
@@ -107,7 +107,7 @@ Start your app, built with the feature on and the `attach` call compiled in:
 
 Then ask your coding agent to take a look. A typical round goes like this. `list_apps` finds your app. `snapshot` prints the window. `query` picks out one widget. `interact` opens an expander and fills in an entry. `wait_for` waits until the Save button can be clicked. `capture` takes a picture of the expander so the agent can see the result. After you rebuild, `restart_app` starts the new binary and the session carries on. It needs `--allow-launch`.
 
-`--toolsets` picks the tools your client sees. The default is `core`; `all` turns on every toolset. Add `app` if you registered state, and `a11y` for accessibility checks. The `a11y` tools also need `--allow-atspi`, and the app must be started with `GTK_A11Y=atspi`. `--allow-launch` lets the broker start and stop apps itself. It comes with presets, for example for in-app file choosers or testing translations.
+The broker lists every tool. `--tools a,b` offers only the named tools and `--exclude-tools x,y` hides the named ones; an unknown name stops the broker from starting. The `a11y` tools need `--allow-atspi` for their AT-SPI half, and the app must be started with `GTK_A11Y=atspi`. `--allow-launch` lets the broker start and stop apps itself. It comes with presets, for example for in-app file choosers or testing translations.
 
 ## Command line
 
@@ -118,13 +118,13 @@ gtk-mcp doctor                                   # checks the socket directory, 
 gtk-mcp apps                                     # lists running apps: session, pid, app id, GTK version, state
 gtk-mcp state                                    # lists registered app states: session, app id, name
 gtk-mcp state panels --app org.example.App        # reads one registered state's JSON value
-gtk-mcp tools                                    # lists every tool by toolset, R for read-only and M for mutating
+gtk-mcp tools                                    # lists every tool by group, R for read-only and M for mutating
 gtk-mcp tools interact                           # one tool's description and the JSON schema of its arguments
 gtk-mcp call capture '{"target":"w1"}' -o a.png  # runs one tool and saves the picture
 gtk-mcp prime                                    # prints a usage guide for coding agents
 ```
 
-`doctor` only reads. It exits 1 when the socket directory is unusable or an app fails its handshake. `call` takes the tool name, the arguments as JSON (or `-` to read them from stdin) and `--app` with a session id, a pid or an app id. You can leave `--app` out when only one app runs. Results are printed as JSON, errors go to stderr and exit with 1. Progress updates go to stderr as `gtk-mcp: progress …`; stdout contains only the result. Every toolset is on for `call`. `--allow-launch` and `--allow-atspi` work as they do for the server. `--json` on `doctor`, `apps`, `tools` and `state` gives machine output.
+`doctor` only reads. It exits 1 when the socket directory is unusable or an app fails its handshake. `call` takes the tool name, the arguments as JSON (or `-` to read them from stdin) and `--app` with a session id, a pid or an app id. You can leave `--app` out when only one app runs. Results are printed as JSON, errors go to stderr and exit with 1. Progress updates go to stderr as `gtk-mcp: progress …`; stdout contains only the result. `call` can run every tool. `--allow-launch` and `--allow-atspi` work as they do for the server. `--json` on `doctor`, `apps`, `tools` and `state` gives machine output.
 
 `state` lists the JSON states registered by running apps with `register_state`. With a name, it prints that state's value as pretty JSON. Names are relative to `app-state/`: a registration named `app-state/panels` is read with `gtk-mcp state panels`. `--app` accepts the same selectors as `call` and also filters the list. Without `--app`, a read selects the only app with that name; if several apps have it, the error lists candidates. An unknown name reports the available names.
 

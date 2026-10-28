@@ -168,7 +168,6 @@ fn start_fixture(display: &Display, bus: &PrivateBus) -> Fixture {
 fn broker(fx: &Fixture, bus: &PrivateBus, atspi: bool) -> Client {
     let policy = Policy {
         allow_atspi: atspi,
-        toolsets: vec!["core".into(), "a11y".into(), "diagnostics".into()],
         ..Policy::default()
     };
     let mut config = Config::with_socket_dir(fx.dir.path());

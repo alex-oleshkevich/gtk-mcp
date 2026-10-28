@@ -17,7 +17,7 @@ fn by_id(id: &str) -> Value {
 }
 
 fn broker(fx: &Fixture) -> Arc<Broker> {
-    let policy = Policy { toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
+    let policy = Policy::default();
     Broker::new(policy, Config::with_socket_dir(fx.dir.path())).unwrap()
 }
 
@@ -170,7 +170,7 @@ async fn late_result(c: &Client, after: u64) -> Value {
 async fn actions_that_outlive_the_deadline_are_reported_as_late_results() {
     let display = require_display!();
     let fx = Fixture::start(&display, &[]);
-    let policy = Policy { toolsets: vec!["core".into(), "actions".into()], ..Policy::default() };
+    let policy = Policy::default();
     let mut cfg = Config::with_socket_dir(fx.dir.path());
     cfg.default_deadline_ms = 1000;
     let c = Client { broker: Broker::new(policy, cfg).unwrap() };
@@ -583,26 +583,17 @@ async fn actions_run_inside_batch() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn actions_toolset_is_absent_under_the_default_core_toolset() {
+async fn actions_tools_are_exposed_by_default_and_tools_narrows() {
     let display = require_display!();
     let fx = Fixture::start(&display, &[]);
     let names = ["list_actions", "inspect_action", "activate_action", "change_action_state", "inspect_action_binding", "inspect_menu", "inspect_shortcuts", "activate_shortcut", "inspect_controllers"];
-    let core = Broker::new(Policy::default(), Config::with_socket_dir(fx.dir.path())).unwrap();
-    for n in names {
-        assert!(!core.is_enabled(n), "{n} must not be exposed by --toolsets core");
-    }
-    let c = Client { broker: core };
-    let e = c.err("list_actions", json!({"scope": "window"})).await;
-    assert_eq!(e.code, ErrorCode::InvalidParams);
-    assert!(e.message.contains("unknown tool"), "{}", e.message);
-
     let both = broker(&fx);
     for n in names {
         assert!(both.is_enabled(n), "{n}");
     }
-    // --tools narrows within a toolset
+    // --tools narrows
     let only = Broker::new(
-        Policy { toolsets: vec!["actions".into()], tools: Some(vec!["list_actions".into()]), ..Policy::default() },
+        Policy { tools: Some(vec!["list_actions".into()]), ..Policy::default() },
         Config::with_socket_dir(fx.dir.path()),
     )
     .unwrap();
