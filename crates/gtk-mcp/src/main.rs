@@ -83,7 +83,7 @@ struct CallArgs {
 
 #[derive(Args, Debug)]
 struct ServeArgs {
-    /// Comma-separated toolsets to expose.
+    /// Comma-separated toolsets to expose; `all` selects every toolset.
     #[arg(long, value_delimiter = ',', default_value = "core")]
     toolsets: Vec<String>,
     /// Comma-separated exact tool names; restricts the selected toolsets to these.
@@ -111,6 +111,15 @@ struct ServeArgs {
 
 fn names(v: Vec<String>) -> Vec<String> {
     v.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+/// `names`, with `all` expanded to every toolset (`protocol::TOOLSETS`).
+fn toolsets(v: Vec<String>) -> Vec<String> {
+    let v = names(v);
+    if v.iter().any(|s| s == "all") {
+        return TOOLSETS.iter().map(|s| (*s).to_owned()).collect();
+    }
+    v
 }
 
 #[tokio::main]
@@ -151,7 +160,7 @@ fn finish(r: anyhow::Result<()>) -> ExitCode {
 
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     let policy = Policy {
-        toolsets: names(a.toolsets),
+        toolsets: toolsets(a.toolsets),
         tools: a.tools.map(names),
         exclude_tools: names(a.exclude_tools),
         allow_launch: a.allow_launch,

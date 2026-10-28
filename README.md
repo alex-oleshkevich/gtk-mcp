@@ -107,7 +107,7 @@ Start your app, built with the feature on and the `attach` call compiled in:
 
 Then ask your coding agent to take a look. A typical round goes like this. `list_apps` finds your app. `snapshot` prints the window. `query` picks out one widget. `interact` opens an expander and fills in an entry. `wait_for` waits until the Save button can be clicked. `capture` takes a picture of the expander so the agent can see the result. After you rebuild, `restart_app` starts the new binary and the session carries on. It needs `--allow-launch`.
 
-`--toolsets` picks the tools your client sees. The default is `core`. Add `app` if you registered state, and `a11y` for accessibility checks. The `a11y` tools also need `--allow-atspi`, and the app must be started with `GTK_A11Y=atspi`. `--allow-launch` lets the broker start and stop apps itself. It comes with presets, for example for in-app file choosers or testing translations.
+`--toolsets` picks the tools your client sees. The default is `core`; `all` turns on every toolset. Add `app` if you registered state, and `a11y` for accessibility checks. The `a11y` tools also need `--allow-atspi`, and the app must be started with `GTK_A11Y=atspi`. `--allow-launch` lets the broker start and stop apps itself. It comes with presets, for example for in-app file choosers or testing translations.
 
 ## Command line
 

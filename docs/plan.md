@@ -189,7 +189,7 @@ enforced where values are serialized.
 | Mutations | n/a | no gate: mutating tools run when their toolset is enabled; the handshake reports versions and capabilities only |
 | Lifecycle (`launch_app`, `restart_app`, `stop_app`) | off | broker `--allow-launch` |
 | AT-SPI source | off | broker `--allow-atspi` |
-| Toolsets | `core` | broker `--toolsets core,actions,...`; `--tools` / `--exclude-tools` refine |
+| Toolsets | `core` | broker `--toolsets core,actions,...` (`all` = every toolset); `--tools` / `--exclude-tools` refine |
 
 - `launch_app` passes the caller's environment variables through like any
   others. The only one it sets is `GTK_MCP_DIR` (its socket directory).

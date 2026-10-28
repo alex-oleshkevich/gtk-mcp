@@ -12,7 +12,7 @@ Each tool is marked `R` or `M`:
 
 The MCP tool annotations follow the same split.
 
-The broker flag `--toolsets` picks which groups of tools are offered. The default is `core`. `--tools` and `--exclude-tools` add or remove single tools. An unknown name stops the broker from starting.
+The broker flag `--toolsets` picks which groups of tools are offered. The default is `core`; `all` selects every toolset. `--tools` and `--exclude-tools` add or remove single tools. An unknown name stops the broker from starting.
 
 A target is either a ref (`w12`, `o4`) or a selector (see `plan.md` section 7). Actions are addressed as `{scope, name}`. Tools that change something accept `observe` and return the state after the change. If the change worked but reading the state back failed, you get both results, and nothing is retried.
 
